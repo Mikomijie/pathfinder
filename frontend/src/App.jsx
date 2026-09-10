@@ -13,7 +13,6 @@ import LessonComplete from './pages/dashboard/lesson/LessonComplete';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
-  console.log(process.env.REACT_APP_OPENROUTER_KEY);
   return (
     <BrowserRouter>
       <Routes>
