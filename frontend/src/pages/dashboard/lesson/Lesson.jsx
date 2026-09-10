@@ -432,9 +432,17 @@ export default function Lesson() {
     }
     const text = currentLevel === 4 && quizQuestion ? quizQuestion.question : getCurrentText();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    utterance.onend = () => setSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+utterance.rate = 0.75;
+utterance.pitch = 1;
+
+const voices = window.speechSynthesis.getVoices();
+const preferred = voices.find(v =>
+  v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
+) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+
+if (preferred) utterance.voice = preferred;
+utterance.onend = () => setSpeaking(false);
+window.speechSynthesis.speak(utterance);
     setSpeaking(true);
   };
 
@@ -448,11 +456,12 @@ export default function Lesson() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       await supabase.from('student_progress').upsert({
-        student_id: user.id,
-        topic_id: topicId,
-        level_reached: newLevel,
-        completed: false,
-      }, { onConflict: 'student_id,topic_id' });
+  student_id: user.id,
+  topic_id: topicId,
+  level_reached: newLevel,
+  completed: false,
+  last_studied_at: new Date().toISOString(),
+}, { onConflict: 'student_id,topic_id' });
     } catch (err) {
       console.error(err);
     }
@@ -466,11 +475,12 @@ export default function Lesson() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       await supabase.from('student_progress').upsert({
-        student_id: user.id,
-        topic_id: topicId,
-        level_reached: currentLevel,
-        completed: false,
-      }, { onConflict: 'student_id,topic_id' });
+  student_id: user.id,
+  topic_id: topicId,
+  level_reached: currentLevel,
+  completed: false,
+  last_studied_at: new Date().toISOString(),
+}, { onConflict: 'student_id,topic_id' });
     } catch (err) {
       console.error(err);
     }

@@ -11,6 +11,8 @@ import TopicsList from './pages/dashboard/lesson/TopicsList';
 import Lesson from './pages/dashboard/lesson/Lesson';
 import LessonComplete from './pages/dashboard/lesson/LessonComplete';
 import ProtectedRoute from './components/ProtectedRoute';
+import Quiz from './pages/dashboard/lesson/Quiz';
+import Flashcards from './pages/dashboard/flashcards/Flashcards';
 
 function App() {
   return (
@@ -42,10 +44,15 @@ function App() {
           </ProtectedRoute>
         } />
         <Route path="/lesson/:topicId/quiz" element={
-          <ProtectedRoute>
-            <LessonComplete />
-          </ProtectedRoute>
-        } />
+  <ProtectedRoute>
+    <Quiz />
+  </ProtectedRoute>
+} />
+<Route path="/flashcards/:topicId" element={
+  <ProtectedRoute>
+    <Flashcards />
+  </ProtectedRoute>
+} />
         <Route path="/lesson/:topicId/complete" element={
           <ProtectedRoute>
             <LessonComplete />
