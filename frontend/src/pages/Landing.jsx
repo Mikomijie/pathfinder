@@ -223,12 +223,12 @@ export default function Landing() {
             {["Problem","Solution","Features"].map(l => (
               <a key={l} href={`#${l.toLowerCase()}`} className="text-[14px] font-medium text-[#475467] hover:text-[#136299] transition-colors">{l}</a>
             ))}
-            <a href="#cta" className="px-5 py-2 bg-[#136299] text-white text-[14px] font-semibold rounded-lg hover:bg-[#0F4F7A] transition-colors">
+            <a href="/signup" className="px-5 py-2 bg-[#136299] text-white text-[14px] font-semibold rounded-lg hover:bg-[#0F4F7A] transition-colors">
               Get Started
             </a>
           </nav>
           {/* Mobile nav */}
-          <a href="#cta" className="md:hidden px-4 py-2 bg-[#136299] text-white text-[13px] font-semibold rounded-lg">
+          <a href="/signup" className="md:hidden px-4 py-2 bg-[#136299] text-white text-[13px] font-semibold rounded-lg">
             Get Started
           </a>
         </div>
@@ -251,7 +251,7 @@ export default function Landing() {
               Help neurodivergent students learn at their pace. Give teachers real insight into how each child learns across West Africa.
             </p>
             <div className="a4 mt-8">
-              <a href="#cta" className="inline-flex items-center gap-2 px-10 py-4 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[15px] font-bold rounded-xl transition-colors shadow-lg shadow-[#5B9BD5]/20">
+              <a href="/signup" className="inline-flex items-center gap-2 px-10 py-4 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[15px] font-bold rounded-xl transition-colors shadow-lg shadow-[#5B9BD5]/20">
                 Get Started {Icons.arrow}
               </a>
             </div>
@@ -459,7 +459,7 @@ export default function Landing() {
             <p className="text-[15px] md:text-[16px] text-[#475467] mt-4 mb-10 leading-[1.8]">
               Join students and teachers building inclusive classrooms across West Africa.
             </p>
-            <a href="#" className="inline-flex items-center gap-2 px-10 py-4 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[15px] font-bold rounded-xl transition-colors shadow-lg shadow-[#136299]/20">
+            <a href="/signup" className="inline-flex items-center gap-2 px-10 py-4 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[15px] font-bold rounded-xl transition-colors shadow-lg shadow-[#136299]/20">
               Get Started Now {Icons.arrow}
             </a>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-6">
