@@ -503,7 +503,7 @@ export default function Landing() {
               <ul className="flex flex-col gap-3">
                 <li><a href="mailto:hello@pathfinder.ng" className="text-[14px] text-[#475467] hover:text-white transition-colors">hello@pathfinder.ng</a></li>
                 <li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">Twitter / X</button></li>
-<li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">LinkedIn</button></li>ss
+<li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">LinkedIn</button></li>
               </ul>
             </div>
           </div>
