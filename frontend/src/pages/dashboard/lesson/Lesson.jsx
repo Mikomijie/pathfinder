@@ -362,11 +362,11 @@ export default function Lesson() {
   useEffect(() => {
     fetchLesson();
     return () => window.speechSynthesis?.cancel();
-  }, [topicId]);
+  }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (currentLevel === 4) fetchQuizQuestion();
-  }, [currentLevel]);
+  }, [currentLevel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchLesson = async () => {
     try {

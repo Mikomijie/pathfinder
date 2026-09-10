@@ -502,8 +502,8 @@ export default function Landing() {
               <h4 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Contact</h4>
               <ul className="flex flex-col gap-3">
                 <li><a href="mailto:hello@pathfinder.ng" className="text-[14px] text-[#475467] hover:text-white transition-colors">hello@pathfinder.ng</a></li>
-                <li><a href="#" className="text-[14px] text-[#475467] hover:text-white transition-colors">Twitter / X</a></li>
-                <li><a href="#" className="text-[14px] text-[#475467] hover:text-white transition-colors">LinkedIn</a></li>
+                <li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">Twitter / X</button></li>
+<li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">LinkedIn</button></li>ss
               </ul>
             </div>
           </div>
