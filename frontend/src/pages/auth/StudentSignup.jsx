@@ -25,7 +25,7 @@ const uniLevels = [
 export default function StudentSignup() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
     full_name: '',
@@ -33,7 +33,8 @@ const [showPassword, setShowPassword] = useState(false);
     password: '',
     student_level: '',
     grade_level: '',
-    school_name: ''
+    school_name: '',
+    class_code: ''
   });
 
   const handleChange = (e) => {
@@ -66,6 +67,21 @@ const [showPassword, setShowPassword] = useState(false);
 
       if (profileError) throw profileError;
 
+      if (form.class_code) {
+        const { data: classData } = await supabase
+          .from('classes')
+          .select('id')
+          .eq('code', form.class_code.toUpperCase())
+          .single();
+
+        if (classData) {
+          await supabase.from('class_members').insert({
+            class_id: classData.id,
+            student_id: data.user.id,
+          });
+        }
+      }
+
       navigate('/dashboard/student');
     } catch (err) {
       setError(err.message);
@@ -80,7 +96,6 @@ const [showPassword, setShowPassword] = useState(false);
     <div className="min-h-screen bg-[#FCFAF9] flex flex-col">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
 
-      {/* Nav */}
       <header className="w-full border-b border-[#E4E7EC] bg-white">
         <div className="max-w-[1200px] mx-auto px-6 h-[60px] flex items-center justify-between">
           <Logo />
@@ -98,6 +113,7 @@ const [showPassword, setShowPassword] = useState(false);
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className="w-full max-w-[480px]">
+
           <div className="text-center mb-8">
             <div className="w-14 h-14 rounded-2xl bg-[#EFF6FF] flex items-center justify-center mx-auto mb-4">
               <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 text-[#136299]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -150,37 +166,37 @@ const [showPassword, setShowPassword] = useState(false);
             <div>
               <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Password</label>
               <div className="relative">
-  <input
-    name="password"
-    type={showPassword ? 'text' : 'password'}
-    required
-    placeholder="At least 6 characters"
-    value={form.password}
-    onChange={handleChange}
-    className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all pr-12"
-  />
-  <button
-    type="button"
-    onClick={() => setShowPassword(!showPassword)}
-    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#475467] transition-colors"
-  >
-    {showPassword ? (
-      <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-        <line x1="1" y1="1" x2="23" y2="23"/>
-      </svg>
-    ) : (
-      <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-        <circle cx="12" cy="12" r="3"/>
-      </svg>
-    )}
-  </button>
-</div>
+                <input
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="At least 6 characters"
+                  value={form.password}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#475467] transition-colors"
+                >
+                  {showPassword ? (
+                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                      <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
 
-            {/* Student Level — TWO BIG CARDS */}
+            {/* Student Level */}
             <div>
               <label className="text-[13px] font-semibold text-[#1E293B] block mb-2">What level are you?</label>
               <div className="grid grid-cols-2 gap-3">
@@ -228,7 +244,7 @@ const [showPassword, setShowPassword] = useState(false);
               </div>
             </div>
 
-            {/* Grade/Level dropdown — shows after level picked */}
+            {/* Grade/Level dropdown */}
             {form.student_level && (
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
@@ -249,21 +265,44 @@ const [showPassword, setShowPassword] = useState(false);
               </div>
             )}
 
-            {/* School/University Name */}
-            <div>
-              <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
-                {isUniversity ? 'University Name' : 'School Name'}{' '}
-                <span className="text-[#94A3B8] font-normal">(optional)</span>
-              </label>
-              <input
-                name="school_name"
-                type="text"
-                placeholder={isUniversity ? 'Your university name' : 'Your school name'}
-                value={form.school_name}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
-              />
-            </div>
+            {/* Class Code */}
+            {form.student_level && (
+              <div>
+                <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
+                  Class Code{' '}
+                  <span className="text-[#94A3B8] font-normal">(from your teacher — optional)</span>
+                </label>
+                <input
+                  name="class_code"
+                  type="text"
+                  placeholder="e.g. PATH-4821"
+                  value={form.class_code}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all uppercase"
+                />
+                <p className="text-[11px] text-[#94A3B8] mt-1.5">
+                  Ask your teacher for this code to access their class materials.
+                </p>
+              </div>
+            )}
+
+            {/* School Name */}
+            {form.student_level && (
+              <div>
+                <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
+                  {isUniversity ? 'University Name' : 'School Name'}{' '}
+                  <span className="text-[#94A3B8] font-normal">(optional)</span>
+                </label>
+                <input
+                  name="school_name"
+                  type="text"
+                  placeholder={isUniversity ? 'Your university name' : 'Your school name'}
+                  value={form.school_name}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
+                />
+              </div>
+            )}
 
             <button
               type="submit"
@@ -272,12 +311,14 @@ const [showPassword, setShowPassword] = useState(false);
             >
               {loading ? 'Creating account...' : 'Create Account'}
             </button>
+
           </form>
 
           <p className="mt-6 text-center text-[14px] text-[#475467]">
             Already have an account?{' '}
             <a href="/login" className="text-[#136299] font-semibold hover:underline">Log in</a>
           </p>
+
         </div>
       </div>
     </div>
