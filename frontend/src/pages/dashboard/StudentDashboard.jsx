@@ -4,6 +4,7 @@ import { supabase } from '../../supabaseClient';
 import Home from './home/Home';
 import Subjects from './subjects/Subjects';
 import Progress from './progress/Progress';
+import FlashcardsHome from './flashcards/FlashcardsHome';
 
 const Icons = {
   logo: (
@@ -133,6 +134,7 @@ export default function StudentDashboard() {
           onLogout={handleLogout}
         />
       );
+      case 'flashcards': return <FlashcardsHome profile={profile} />;
       default: return <Home profile={profile} onNavigate={setActiveNav} />;
     }
   };
