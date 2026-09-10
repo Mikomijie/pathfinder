@@ -119,10 +119,6 @@ export default function TeacherDashboard() {
   const [newClassForm, setNewClassForm] = useState({ name: '', subject: '', level: '', grade_level: '' });
   const [creatingClass, setCreatingClass] = useState(false);
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
-
   const fetchAll = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { navigate('/login'); return; }
@@ -153,6 +149,10 @@ export default function TeacherDashboard() {
 
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchAll();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -216,9 +216,7 @@ export default function TeacherDashboard() {
   const classStudents = selectedClass
     ? students.filter(s => s.class_id === selectedClass.id)
     : [];
-  const classMaterials = selectedClass
-    ? materials.filter(m => m.class_id === selectedClass.id)
-    : [];
+
 
   const navItems = [
     { key: 'home', label: 'Home', icon: Icons.home },

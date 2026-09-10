@@ -84,7 +84,7 @@ export default function TopicsList() {
 
   useEffect(() => {
     fetchTopics();
-  }, [decodedSubject]);
+  }, [decodedSubject]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchTopics = async () => {
     const { data: { user } } = await supabase.auth.getUser();
