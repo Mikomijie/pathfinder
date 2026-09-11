@@ -6,6 +6,7 @@ import Subjects from './subjects/Subjects';
 import Progress from './progress/Progress';
 import FlashcardsHome from './flashcards/FlashcardsHome';
 import PDFUpload from './upload/PDFUpload';
+import SkillsHub from './skills/SkillsHub';
 
 const Icons = {
   logo: (
@@ -27,17 +28,17 @@ const Icons = {
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
     </svg>
   ),
+  flashcards: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="2" y="5" width="20" height="14" rx="2"/>
+      <line x1="2" y1="10" x2="22" y2="10"/>
+    </svg>
+  ),
   progress: (
     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <line x1="18" x2="18" y1="20" y2="10"/>
       <line x1="12" x2="12" y1="20" y2="4"/>
       <line x1="6" x2="6" y1="20" y2="14"/>
-    </svg>
-  ),
-  flashcards: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="2" y="5" width="20" height="14" rx="2"/>
-      <line x1="2" y1="10" x2="22" y2="10"/>
     </svg>
   ),
   settings: (
@@ -59,6 +60,18 @@ const Icons = {
       <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
     </svg>
   ),
+  upload: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+  ),
+  skills: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5L12 2z"/>
+    </svg>
+  ),
   menu: (
     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <line x1="3" y1="6" x2="21" y2="6"/>
@@ -67,18 +80,11 @@ const Icons = {
     </svg>
   ),
   close: (
-  <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <line x1="18" y1="6" x2="6" y2="18"/>
-    <line x1="6" y1="6" x2="18" y2="18"/>
-  </svg>
-),
-upload: (
-  <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-    <polyline points="17 8 12 3 7 8"/>
-    <line x1="12" y1="3" x2="12" y2="15"/>
-  </svg>
-),
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="18" y1="6" x2="6" y2="18"/>
+      <line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
 };
 
 export default function StudentDashboard() {
@@ -90,7 +96,11 @@ export default function StudentDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    fetchProfile();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchProfile = async () => {
+    try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate('/login'); return; }
       const { data } = await supabase
@@ -99,10 +109,12 @@ export default function StudentDashboard() {
         .eq('id', user.id)
         .single();
       setProfile(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
       setLoading(false);
-    };
-    fetchProfile();
-  }, [navigate]);
+    }
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -111,14 +123,37 @@ export default function StudentDashboard() {
 
   const isUniversity = profile?.student_level === 'university';
 
-const navItems = [
-  { key: 'home', label: 'Home', icon: Icons.home },
-  { key: 'subjects', label: 'My Subjects', icon: Icons.subjects },
-  { key: 'flashcards', label: 'Flashcards', icon: Icons.flashcards },
-  ...(isUniversity ? [{ key: 'upload', label: 'Upload Notes', icon: Icons.upload }] : []),
-  { key: 'progress', label: 'Progress', icon: Icons.progress },
-  { key: 'settings', label: 'Settings', icon: Icons.settings },
-];
+  const navItems = [
+    { key: 'home', label: 'Home', icon: Icons.home },
+    { key: 'subjects', label: 'My Subjects', icon: Icons.subjects },
+    { key: 'flashcards', label: 'Flashcards', icon: Icons.flashcards },
+    ...(isUniversity ? [
+      { key: 'upload', label: 'Upload Notes', icon: Icons.upload },
+      { key: 'skills', label: 'Skills Hub', icon: Icons.skills },
+    ] : []),
+    { key: 'progress', label: 'Progress', icon: Icons.progress },
+    { key: 'settings', label: 'Settings', icon: Icons.settings },
+  ];
+
+  const renderContent = () => {
+    switch (activeNav) {
+      case 'home': return <Home profile={profile} onNavigate={setActiveNav} />;
+      case 'subjects': return <Subjects profile={profile} />;
+      case 'flashcards': return <FlashcardsHome profile={profile} />;
+      case 'upload': return <PDFUpload profile={profile} />;
+      case 'skills': return <SkillsHub />;
+      case 'progress': return <Progress profile={profile} />;
+      case 'settings': return (
+        <Settings
+          profile={profile}
+          focusMode={focusMode}
+          setFocusMode={setFocusMode}
+          onLogout={handleLogout}
+        />
+      );
+      default: return <Home profile={profile} onNavigate={setActiveNav} />;
+    }
+  };
 
   if (loading) {
     return (
@@ -132,25 +167,6 @@ const navItems = [
     );
   }
 
-  const renderContent = () => {
-    switch (activeNav) {
-      case 'home': return <Home profile={profile} onNavigate={setActiveNav} />;
-      case 'subjects': return <Subjects profile={profile} onNavigate={setActiveNav} />;
-      case 'progress': return <Progress profile={profile} />;
-      case 'settings': return (
-        <Settings
-          profile={profile}
-          focusMode={focusMode}
-          setFocusMode={setFocusMode}
-          onLogout={handleLogout}
-        />
-      );
-      case 'flashcards': return <FlashcardsHome profile={profile} />;
-case 'upload': return <PDFUpload profile={profile} />;
-      default: return <Home profile={profile} onNavigate={setActiveNav} />;
-    }
-  };
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex">
       <style>{`
@@ -158,10 +174,13 @@ case 'upload': return <PDFUpload profile={profile} />;
         * { font-family: 'Plus Jakarta Sans', sans-serif; }
       `}</style>
 
+      {/* SIDEBAR OVERLAY */}
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden" onClick={() => setSidebarOpen(false)}/>
+        <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}/>
       )}
 
+      {/* SIDEBAR */}
       {!focusMode && (
         <aside className={`
           fixed md:sticky top-0 left-0 h-screen w-[240px] bg-white border-r border-[#E4E7EC]
@@ -172,7 +191,8 @@ case 'upload': return <PDFUpload profile={profile} />;
             {Icons.logo}
             <span className="text-[16px] font-bold text-[#136299]">PATHFINDER</span>
           </div>
-          <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
+
+          <nav className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto">
             {navItems.map(item => (
               <button
                 key={item.key}
@@ -190,6 +210,7 @@ case 'upload': return <PDFUpload profile={profile} />;
               </button>
             ))}
           </nav>
+
           <div className="px-3 py-4 border-t border-[#E4E7EC] flex flex-col gap-1">
             <button
               onClick={() => setFocusMode(true)}
@@ -208,6 +229,7 @@ case 'upload': return <PDFUpload profile={profile} />;
         </aside>
       )}
 
+      {/* MAIN */}
       <div className="flex-1 flex flex-col min-h-screen">
         <header className="h-[60px] bg-white border-b border-[#E4E7EC] flex items-center justify-between px-5 md:px-8 sticky top-0 z-20">
           <div className="flex items-center gap-3">
@@ -260,7 +282,9 @@ function Settings({ profile, focusMode, setFocusMode, onLogout }) {
           <div>
             <p className="text-[16px] font-bold text-[#0F172A]">{profile?.full_name}</p>
             <p className="text-[13px] text-[#94A3B8]">{profile?.email}</p>
-            <p className="text-[13px] text-[#94A3B8]">{profile?.grade_level} · {profile?.school_name || 'No school set'}</p>
+            <p className="text-[13px] text-[#94A3B8]">
+              {profile?.grade_level} · {profile?.school_name || 'No school set'}
+            </p>
           </div>
         </div>
         <div className="pt-4 border-t border-[#F1F5F9]">
