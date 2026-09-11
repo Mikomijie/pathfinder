@@ -150,11 +150,22 @@ export default function PDFUpload({ profile, onNavigate }) {
       if (data?.error) throw new Error(data.error);
       setDone(data);
     } catch (err) {
-      clearInterval(stepInterval);
-      setError(err.message || 'Something went wrong. Please try again.');
-    } finally {
-      setProcessing(false);
-    }
+  clearInterval(stepInterval);
+  const msg = err.message || '';
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
+    setError('Connection lost. Please check your internet and try again.');
+  } else if (msg.includes('timeout') || msg.includes('timed out')) {
+    setError('This is taking longer than usual. Please try again with a shorter piece of text.');
+  } else if (msg.includes('extract') || msg.includes('Could not read')) {
+    setError('Could not read this PDF. Please switch to "Paste Notes" and paste your content directly.');
+  } else if (msg.includes('Empty response') || msg.includes('OpenRouter')) {
+    setError('Our AI is busy right now. Please wait a moment and try again.');
+  } else {
+    setError('Something went wrong. Please try again or switch to Paste Notes mode.');
+  }
+} finally {
+  setProcessing(false);
+}
   };
 
   // SUCCESS SCREEN
@@ -256,11 +267,24 @@ export default function PDFUpload({ profile, onNavigate }) {
       </div>
 
       {error && (
-        <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A] font-medium flex items-center gap-2">
-          <button onClick={() => setError('')} className="flex-shrink-0">{Icons.close}</button>
-          {error}
-        </div>
+  <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl flex gap-3">
+    <div className="flex-1">
+      <p className="text-[13px] font-bold text-[#BA1A1A] mb-1">Something went wrong</p>
+      <p className="text-[13px] text-[#BA1A1A]">{error}</p>
+      {error.includes('PDF') && (
+        <button
+          onClick={() => { setMode('paste'); setError(''); }}
+          className="mt-2 text-[12px] font-bold text-[#136299] hover:underline"
+        >
+          Switch to Paste Notes instead
+        </button>
       )}
+    </div>
+    <button onClick={() => setError('')} className="flex-shrink-0 text-[#BA1A1A]">
+      {Icons.close}
+    </button>
+  </div>
+)}
 
       <form onSubmit={handleSubmit} className="f2 flex flex-col gap-5">
 
