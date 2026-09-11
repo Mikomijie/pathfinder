@@ -275,9 +275,11 @@ export default function Home({ profile, onNavigate }) {
                     We'll break them into micro-lessons and read them aloud for you.
                   </p>
                 </div>
-                <button className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0">
-                  {Icons.upload} Upload PDF
-                </button>
+                <button
+  onClick={() => onNavigate('upload')}
+  className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0">
+  {Icons.upload} Upload PDF
+</button>
               </div>
             </div>
           )}

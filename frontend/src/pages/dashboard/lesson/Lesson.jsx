@@ -397,26 +397,31 @@ export default function Lesson() {
   };
 
   const fetchQuizQuestion = async () => {
-    try {
-      const { data } = await supabase
-        .from('quiz_questions')
-        .select('*')
-        .eq('topic_id', topicId)
-        .limit(5);
+  try {
+    const { data } = await supabase
+      .from('quiz_questions')
+      .select('*')
+      .eq('topic_id', topicId)
+      .limit(5);
 
-      if (data && data.length > 0) {
-        const random = data[Math.floor(Math.random() * data.length)];
-        setQuizQuestion({
-          question: random.question,
-          options: [random.option_a, random.option_b, random.option_c, random.option_d],
-          answer: ['A','B','C','D'].indexOf(random.answer),
-          explanation: `The correct answer is option ${random.answer}.`
-        });
-      }
-    } catch (err) {
-      console.error(err);
+    if (data && data.length > 0) {
+      const random = data[Math.floor(Math.random() * data.length)];
+      setQuizQuestion({
+        question: random.question,
+        options: [random.option_a, random.option_b, random.option_c, random.option_d],
+        answer: ['A','B','C','D'].indexOf(random.answer),
+        explanation: `The correct answer is option ${random.answer}.`
+      });
+    } else if (lesson) {
+      // AI-generated topic — generate question from OpenRouter
+      const { generateInteractiveQuestion } = await import('../../../services/openrouter');
+      const q = await generateInteractiveQuestion(topic?.title, lesson?.level_1);
+      if (q) setQuizQuestion(q);
     }
-  };
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   const getCurrentText = () => {
     if (!lesson) return '';

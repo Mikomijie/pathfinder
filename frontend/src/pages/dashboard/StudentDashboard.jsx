@@ -5,6 +5,7 @@ import Home from './home/Home';
 import Subjects from './subjects/Subjects';
 import Progress from './progress/Progress';
 import FlashcardsHome from './flashcards/FlashcardsHome';
+import PDFUpload from './upload/PDFUpload';
 
 const Icons = {
   logo: (
@@ -66,11 +67,18 @@ const Icons = {
     </svg>
   ),
   close: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <line x1="18" y1="6" x2="6" y2="18"/>
-      <line x1="6" y1="6" x2="18" y2="18"/>
-    </svg>
-  ),
+  <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+),
+upload: (
+  <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+),
 };
 
 export default function StudentDashboard() {
@@ -101,13 +109,16 @@ export default function StudentDashboard() {
     navigate('/');
   };
 
-  const navItems = [
-    { key: 'home', label: 'Home', icon: Icons.home },
-    { key: 'subjects', label: 'My Subjects', icon: Icons.subjects },
-    { key: 'flashcards', label: 'Flashcards', icon: Icons.flashcards },
-    { key: 'progress', label: 'Progress', icon: Icons.progress },
-    { key: 'settings', label: 'Settings', icon: Icons.settings },
-  ];
+  const isUniversity = profile?.student_level === 'university';
+
+const navItems = [
+  { key: 'home', label: 'Home', icon: Icons.home },
+  { key: 'subjects', label: 'My Subjects', icon: Icons.subjects },
+  { key: 'flashcards', label: 'Flashcards', icon: Icons.flashcards },
+  ...(isUniversity ? [{ key: 'upload', label: 'Upload Notes', icon: Icons.upload }] : []),
+  { key: 'progress', label: 'Progress', icon: Icons.progress },
+  { key: 'settings', label: 'Settings', icon: Icons.settings },
+];
 
   if (loading) {
     return (
@@ -135,6 +146,7 @@ export default function StudentDashboard() {
         />
       );
       case 'flashcards': return <FlashcardsHome profile={profile} />;
+case 'upload': return <PDFUpload profile={profile} />;
       default: return <Home profile={profile} onNavigate={setActiveNav} />;
     }
   };
