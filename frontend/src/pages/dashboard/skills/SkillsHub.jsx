@@ -282,7 +282,7 @@ const levelLabels = {
 };
 
 export default function SkillsHub() {
-  const navigate = useNavigate();
+  const navigate = useNavigate(); // eslint-disable-line no-unused-vars
   const [activeSkill, setActiveSkill] = useState(null);
   const [activeLesson, setActiveLesson] = useState(null);
   const [currentLevel, setCurrentLevel] = useState(1);

@@ -323,20 +323,7 @@ export default function Subjects({ profile, onNavigate }) {
     return map[subject] || '#EFF6FF';
   };
 
-  // Skeleton loader component
-  const SubjectSkeleton = () => (
-    <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-[#F1F5F9] flex-shrink-0"/>
-        <div>
-          <div className="w-32 h-4 bg-[#F1F5F9] rounded mb-2"/>
-          <div className="w-24 h-3 bg-[#F1F5F9] rounded mb-2"/>
-          <div className="w-28 h-1.5 bg-[#F1F5F9] rounded-full"/>
-        </div>
-      </div>
-      <div className="w-4 h-4 bg-[#F1F5F9] rounded"/>
-    </div>
-  );
+
 
   return (
     <div className="flex flex-col gap-6">
