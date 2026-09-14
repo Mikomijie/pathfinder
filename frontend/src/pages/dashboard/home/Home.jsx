@@ -95,7 +95,7 @@ const subjectConfig = [
   { key: 'Basic Science', icon: Icons.science, color: '#F59E0B', bg: '#FFFBEB' },
 ];
 
-const tips = [
+const secondaryTips = [
   "Break big tasks into tiny steps. Finishing one small thing is still winning.",
   "It is okay to re-read something multiple times. That is not weakness — that is learning.",
   "Your brain works differently, not less. Different is a strength.",
@@ -105,12 +105,12 @@ const tips = [
   "Every topic you complete is real progress. Be proud of it.",
 ];
 
-const uniTips = [
+const universityTips = [
   "Start with 10 minutes of focused work. Build up from there.",
   "Write down one task you have been avoiding. Break it into 3 steps.",
-  "Your ADHD brain works best on topics that interest you. Follow that energy.",
-  "Review your notes within 24 hours — this is when your brain stores information best.",
-  "It is okay to not finish everything today. One step forward is still progress.",
+  "Your brain works best on topics that interest you. Follow that energy.",
+  "Review your notes within 24 hours — that is when your brain stores them best.",
+  "It is okay not to finish everything today. One step forward is still progress.",
   "Body doubling works — study near other people even if you are not studying together.",
   "Put your phone in another room during study blocks. Even 10 minutes helps.",
 ];
@@ -120,8 +120,10 @@ export default function Home({ profile, onNavigate }) {
   const [greeting, setGreeting] = useState('');
   const [tip, setTip] = useState('');
   const [stats, setStats] = useState({ completed: 0, avgScore: 0, streak: 0 });
+  const [nextIncompleteTopic, setNextIncompleteTopic] = useState(null);
   const [lastTopic, setLastTopic] = useState(null);
   const [subjectProgress, setSubjectProgress] = useState({});
+  const [subjectLoading, setSubjectLoading] = useState(true);
   const [uploadedLessons, setUploadedLessons] = useState([]);
   const [classCode, setClassCode] = useState('');
   const [joiningClass, setJoiningClass] = useState(false);
@@ -136,8 +138,7 @@ export default function Home({ profile, onNavigate }) {
     else if (hour < 17) setGreeting('Good afternoon');
     else setGreeting('Good evening');
     const dayIndex = new Date().getDay();
-    const tipList = isUniversity ? uniTips : tips;
-    setTip(tipList[dayIndex % tipList.length]);
+    setTip((isUniversity ? universityTips : secondaryTips)[dayIndex % 7]);
     fetchRealData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -148,21 +149,23 @@ export default function Home({ profile, onNavigate }) {
 
       const { data: progressData } = await supabase
         .from('student_progress')
-        .select('*, topics(title, subject, id)')
+        .select('*, topics(title, subject, id, order_index)')
         .eq('student_id', user.id)
         .order('last_studied_at', { ascending: false });
 
       if (!progressData || progressData.length === 0) {
         setLoading(false);
+        setSubjectLoading(false);
         return;
       }
 
+      // Stats
       const completed = progressData.filter(p => p.completed).length;
       const scores = progressData.filter(p => p.score > 0).map(p => p.score);
       const avgScore = scores.length > 0
-        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
-        : 0;
+        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
 
+      // Streak
       const completedDates = progressData
         .filter(p => p.completed && p.last_studied_at)
         .map(p => new Date(p.last_studied_at).toDateString());
@@ -179,14 +182,28 @@ export default function Home({ profile, onNavigate }) {
       setStats({ completed, avgScore, streak });
       setLastTopic(progressData[0]);
 
+      // Find NEXT INCOMPLETE topic across all subjects
       if (!isUniversity) {
+        const allTopics = await Promise.all(
+          subjectConfig.map(s =>
+            supabase.from('topics').select('*').eq('subject', s.key).order('order_index')
+          )
+        );
+        const allTopicsList = allTopics.flatMap(r => r.data || []);
+        const progressMap = {};
+        progressData.forEach(p => { progressMap[p.topic_id] = p; });
+
+        const nextIncomplete = allTopicsList.find(t => !progressMap[t.id]?.completed);
+        setNextIncompleteTopic(nextIncomplete || null);
+
+        // Subject progress
         const subMap = {};
         for (const s of subjectConfig) {
-          const { data: topics } = await supabase
-            .from('topics').select('id').eq('subject', s.key);
-          const total = topics?.length || 0;
+          const topicsForSubject = allTopics
+            .find((_, i) => subjectConfig[i].key === s.key)?.data || [];
+          const total = topicsForSubject.length;
           const done = progressData.filter(p =>
-            p.completed && topics?.some(t => t.id === p.topic_id)
+            p.completed && topicsForSubject.some(t => t.id === p.topic_id)
           ).length;
           subMap[s.key] = {
             total,
@@ -197,17 +214,19 @@ export default function Home({ profile, onNavigate }) {
         setSubjectProgress(subMap);
       }
 
+      // University uploaded lessons
       if (isUniversity) {
-        const uploadedTopics = progressData
+        const uploaded = progressData
           .filter(p => p.topics?.subject === 'Uploaded Notes')
           .slice(0, 3);
-        setUploadedLessons(uploadedTopics);
+        setUploadedLessons(uploaded);
       }
 
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+      setSubjectLoading(false);
     }
   };
 
@@ -217,24 +236,23 @@ export default function Home({ profile, onNavigate }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const { data: classData } = await supabase
-        .from('classes')
-        .select('id, name')
-        .eq('code', classCode.toUpperCase())
-        .single();
+        .from('classes').select('id, name').eq('code', classCode.toUpperCase().trim()).single();
 
       if (!classData) {
         alert('Class code not found. Please check with your teacher.');
         return;
       }
 
-      await supabase.from('class_members').insert({
+      const { error } = await supabase.from('class_members').insert({
         class_id: classData.id,
         student_id: user.id,
       });
 
+      if (error && error.code !== '23505') throw error; // ignore duplicate
       setClassJoined(true);
       setClassCode('');
     } catch (err) {
+      console.error(err);
       alert('Could not join class. Please try again.');
     } finally {
       setJoiningClass(false);
@@ -242,8 +260,90 @@ export default function Home({ profile, onNavigate }) {
   };
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
+  const continueTarget = nextIncompleteTopic || lastTopic?.topics;
 
-  // UNIVERSITY HOME
+  // Stats sidebar — same for both
+  const StatsSidebar = () => (
+    <div className="flex flex-col gap-4">
+      <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
+        <h3 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Your Stats</h3>
+        <div className="flex flex-col gap-4">
+          {[
+            { label: isUniversity ? 'Lessons Done' : 'Topics Done', value: loading ? '...' : stats.completed.toString(), color: '#136299', bg: '#EFF6FF', icon: Icons.check },
+            { label: 'Day Streak', value: loading ? '...' : `${stats.streak}`, color: '#70AD47', bg: '#F0FDF4', icon: Icons.flame },
+            { label: 'Avg Score', value: loading ? '...' : stats.avgScore > 0 ? `${stats.avgScore}%` : '—', color: '#F59E0B', bg: '#FFFBEB', icon: Icons.star },
+          ].map((s, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: s.bg, color: s.color }}>
+                {s.icon}
+              </div>
+              <div>
+                <p className="text-[22px] font-extrabold leading-none" style={{ color: s.color }}>{s.value}</p>
+                <p className="text-[12px] text-[#94A3B8] mt-0.5">{s.label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Badges */}
+      {!isUniversity && (
+        <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="text-[#F59E0B]">{Icons.trophy}</div>
+            <h3 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest">Badges</h3>
+          </div>
+          {stats.completed === 0 ? (
+            <p className="text-[13px] text-[#94A3B8] leading-[1.6]">
+              Complete your first lesson to earn your first badge.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {stats.completed >= 1 && (
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">{Icons.star}</div>
+                  <div>
+                    <p className="text-[13px] font-bold text-[#1E293B]">First Step</p>
+                    <p className="text-[11px] text-[#94A3B8]">Completed first lesson</p>
+                  </div>
+                </div>
+              )}
+              {stats.completed >= 3 && (
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">{Icons.star}</div>
+                  <div>
+                    <p className="text-[13px] font-bold text-[#1E293B]">On a Roll</p>
+                    <p className="text-[11px] text-[#94A3B8]">Completed 3 topics</p>
+                  </div>
+                </div>
+              )}
+              {stats.streak >= 3 && (
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#FFFBEB] flex items-center justify-center text-[#F59E0B] flex-shrink-0">{Icons.flame}</div>
+                  <div>
+                    <p className="text-[13px] font-bold text-[#1E293B]">Consistent</p>
+                    <p className="text-[11px] text-[#94A3B8]">3 day streak</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Daily tip */}
+      <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="text-[#336b07]">{Icons.lightbulb}</div>
+          <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
+        </div>
+        <p className="text-[13px] text-[#1E293B] leading-[1.7]">{tip}</p>
+      </div>
+    </div>
+  );
+
+  // ─── UNIVERSITY HOME ───────────────────────────────────────────
   if (isUniversity) {
     return (
       <div className="flex flex-col gap-6">
@@ -255,7 +355,6 @@ export default function Home({ profile, onNavigate }) {
           .f4 { animation: fadeUp 0.4s 0.24s ease both; }
         `}</style>
 
-        {/* WELCOME */}
         <div className="f1">
           <h1 className="text-[26px] md:text-[30px] font-extrabold text-[#0F172A]">
             {greeting}, {firstName}.
@@ -263,49 +362,21 @@ export default function Home({ profile, onNavigate }) {
           <p className="text-[14px] text-[#475467] mt-1">
             {stats.completed === 0
               ? "Welcome to Pathfinder. Let's get you started."
-              : `You have completed ${stats.completed} lesson${stats.completed !== 1 ? 's' : ''} so far. Keep going.`}
+              : `You have completed ${stats.completed} lesson${stats.completed !== 1 ? 's' : ''} so far.`}
           </p>
         </div>
 
-        {/* FIRST TIME — ONBOARDING */}
+        {/* FIRST TIME ONBOARDING */}
         {stats.completed === 0 && !loading && (
-          <div className="f2 flex flex-col gap-4">
-            <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Three ways to start learning</p>
-
+          <div className="f2 flex flex-col gap-3">
+            <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Three ways to start</p>
             {[
-              {
-                icon: Icons.upload,
-                color: '#5B9BD5',
-                bg: '#EFF6FF',
-                title: 'Upload Your Notes',
-                desc: 'Upload a PDF or paste lecture notes — we break them into adaptive micro-lessons with voice support.',
-                action: 'Upload Notes',
-                nav: 'upload'
-              },
-              {
-                icon: Icons.search,
-                color: '#70AD47',
-                bg: '#F0FDF4',
-                title: 'Search Any Topic',
-                desc: 'Type any topic — Organic Chemistry, Nigerian History, anything — and we generate a full adaptive lesson.',
-                action: 'Search Topics',
-                nav: 'subjects'
-              },
-              {
-                icon: Icons.skills,
-                color: '#9B8DBE',
-                bg: '#F5F3FF',
-                title: 'Build Study Skills',
-                desc: 'Learn techniques for studying, time management, focus, and emotional regulation — designed for ADHD brains.',
-                action: 'Open Skills Hub',
-                nav: 'skills'
-              },
+              { icon: Icons.upload, color: '#5B9BD5', bg: '#EFF6FF', title: 'Upload Your Notes', desc: 'Upload a PDF or paste lecture notes — we break them into adaptive micro-lessons with voice support.', nav: 'upload' },
+              { icon: Icons.search, color: '#70AD47', bg: '#F0FDF4', title: 'Search Any Topic', desc: 'Type any topic — Organic Chemistry, Nigerian History, anything — and we generate a full adaptive lesson.', nav: 'subjects' },
+              { icon: Icons.skills, color: '#9B8DBE', bg: '#F5F3FF', title: 'Build Study Skills', desc: 'Learn techniques for studying, time management, and focus — designed for ADHD brains.', nav: 'skills' },
             ].map((item, i) => (
-              <button
-                key={i}
-                onClick={() => onNavigate(item.nav)}
-                className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left"
-              >
+              <button key={i} onClick={() => onNavigate(item.nav)}
+                className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left">
                 <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
                   style={{ background: item.bg, color: item.color }}>
                   {item.icon}
@@ -320,7 +391,7 @@ export default function Home({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* HAS LESSONS — CONTINUE */}
+        {/* RETURNING USER — CONTINUE */}
         {stats.completed > 0 && lastTopic && (
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">Continue where you left off</span>
@@ -331,17 +402,15 @@ export default function Home({ profile, onNavigate }) {
                   {lastTopic.completed ? 'Completed' : `Level ${lastTopic.level_reached} of 4`}
                 </p>
               </div>
-              <button
-                onClick={() => navigate(`/lesson/${lastTopic.topic_id}`)}
-                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0"
-              >
+              <button onClick={() => navigate(`/lesson/${lastTopic.topic_id}`)}
+                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0">
                 Continue {Icons.arrow}
               </button>
             </div>
           </div>
         )}
 
-        {/* QUICK ACTIONS — returning users */}
+        {/* QUICK ACTIONS — returning */}
         {stats.completed > 0 && (
           <div className="f3 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
@@ -408,8 +477,7 @@ export default function Home({ profile, onNavigate }) {
               ))}
             </div>
           </div>
-
-          <div className="f4 lg:w-[280px] bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
+          <div className="lg:w-[260px] bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-[#336b07]">{Icons.lightbulb}</div>
               <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
@@ -421,7 +489,7 @@ export default function Home({ profile, onNavigate }) {
     );
   }
 
-  // SECONDARY HOME
+  // ─── SECONDARY HOME ────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-6">
       <style>{`
@@ -449,36 +517,42 @@ export default function Home({ profile, onNavigate }) {
             </p>
           </div>
 
-          {/* CONTINUE LEARNING */}
+          {/* CONTINUE / START CARD — shows NEXT INCOMPLETE topic */}
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">
-              {lastTopic ? 'Continue where you left off' : 'Start learning'}
+              {continueTarget ? (nextIncompleteTopic ? 'Up next' : 'Continue where you left off') : 'Start learning'}
             </span>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
               <div>
                 <h2 className="text-[20px] font-bold text-white">
-                  {lastTopic ? lastTopic.topics?.title : 'Introduction to Fractions'}
+                  {continueTarget?.title || 'Introduction to Fractions'}
                 </h2>
                 <p className="text-[13px] text-[#64748B] mt-1">
-                  {lastTopic
-                    ? `${lastTopic.topics?.subject} · ${lastTopic.completed ? 'Completed' : `Level ${lastTopic.level_reached} of 4`}`
-                    : 'Mathematics · Start here'}
+                  {continueTarget?.subject || 'Mathematics'} · {
+                    lastTopic && !nextIncompleteTopic
+                      ? lastTopic.completed ? 'Completed' : `Level ${lastTopic.level_reached} of 4`
+                      : 'Ready to start'
+                  }
                 </p>
-                {lastTopic && !lastTopic.completed && (
+                {lastTopic && !lastTopic.completed && !nextIncompleteTopic && (
                   <div className="flex items-center gap-3 mt-3">
                     <div className="w-[140px] bg-[#1E293B] rounded-full h-1.5">
                       <div className="bg-[#5B9BD5] h-1.5 rounded-full progress-bar"
-                        style={{ width: `${(lastTopic.level_reached / 4) * 100}%` }}/>
+                        style={{ width: `${((lastTopic.level_reached || 0) / 4) * 100}%` }}/>
                     </div>
                     <span className="text-[12px] text-[#475467]">Level {lastTopic.level_reached} of 4</span>
                   </div>
                 )}
               </div>
               <button
-                onClick={() => lastTopic ? navigate(`/lesson/${lastTopic.topic_id}`) : navigate('/topics/Mathematics')}
-                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0"
+                onClick={() => {
+                  if (nextIncompleteTopic) navigate(`/lesson/${nextIncompleteTopic.id}`);
+                  else if (lastTopic) navigate(`/lesson/${lastTopic.topic_id}`);
+                  else navigate('/topics/Mathematics');
+                }}
+                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0 active:scale-[0.98]"
               >
-                {lastTopic?.completed ? 'Review' : 'Continue'} {Icons.arrow}
+                {nextIncompleteTopic ? 'Start' : lastTopic?.completed ? 'Review' : 'Continue'} {Icons.arrow}
               </button>
             </div>
           </div>
@@ -493,32 +567,41 @@ export default function Home({ profile, onNavigate }) {
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {subjectConfig.map((s) => {
-                const sp = subjectProgress[s.key] || { done: 0, total: 3, progress: 0 };
-                return (
-                  <button key={s.key}
-                    onClick={() => navigate(`/topics/${encodeURIComponent(s.key)}`)}
-                    className="bg-white border border-[#E4E7EC] rounded-2xl p-4 text-left hover:border-[#5B9BD5] hover:shadow-sm transition-all">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-                      style={{ background: s.bg, color: s.color }}>
-                      {s.icon}
-                    </div>
-                    <p className="text-[14px] font-bold text-[#0F172A]">{s.key}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">
-                      {loading ? '...' : `${sp.done} of ${sp.total} topics`}
-                    </p>
-                    <div className="mt-2 bg-[#F1F5F9] rounded-full h-1.5">
-                      <div className="h-1.5 rounded-full progress-bar"
-                        style={{ width: `${sp.progress}%`, background: s.color }}/>
-                    </div>
-                  </button>
-                );
-              })}
+              {subjectLoading ? (
+                [1,2,3].map(i => (
+                  <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-4 animate-pulse">
+                    <div className="w-10 h-10 rounded-xl bg-[#F1F5F9] mb-3"/>
+                    <div className="w-24 h-3 bg-[#F1F5F9] rounded mb-2"/>
+                    <div className="w-16 h-2.5 bg-[#F1F5F9] rounded mb-2"/>
+                    <div className="w-full h-1.5 bg-[#F1F5F9] rounded-full"/>
+                  </div>
+                ))
+              ) : (
+                subjectConfig.map((s) => {
+                  const sp = subjectProgress[s.key] || { done: 0, total: 3, progress: 0 };
+                  return (
+                    <button key={s.key}
+                      onClick={() => navigate(`/topics/${encodeURIComponent(s.key)}`)}
+                      className="bg-white border border-[#E4E7EC] rounded-2xl p-4 text-left hover:border-[#5B9BD5] hover:shadow-sm transition-all active:scale-[0.98]">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
+                        style={{ background: s.bg, color: s.color }}>
+                        {s.icon}
+                      </div>
+                      <p className="text-[14px] font-bold text-[#0F172A]">{s.key}</p>
+                      <p className="text-[11px] text-[#94A3B8] mt-0.5">{sp.done} of {sp.total} topics</p>
+                      <div className="mt-2 bg-[#F1F5F9] rounded-full h-1.5">
+                        <div className="h-1.5 rounded-full progress-bar"
+                          style={{ width: `${sp.progress}%`, background: s.color }}/>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
           {/* JOIN CLASS CODE */}
-          {stats.completed === 0 && !classJoined && (
+          {!classJoined && (
             <div className="f4 bg-[#F8FAFC] border border-[#E4E7EC] rounded-2xl p-5">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299]">
@@ -527,21 +610,17 @@ export default function Home({ profile, onNavigate }) {
                 <p className="text-[14px] font-bold text-[#0F172A]">Have a class code?</p>
               </div>
               <p className="text-[13px] text-[#475467] mb-3">
-                Your teacher may have shared a class code. Enter it to access their materials.
+                Enter your teacher's class code to access their materials.
               </p>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="e.g. PATH-4821"
+                <input type="text" placeholder="e.g. PATH-4821"
                   value={classCode}
                   onChange={e => setClassCode(e.target.value.toUpperCase())}
-                  className="flex-1 px-4 py-2.5 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#5B9BD5] uppercase"
-                />
-                <button
-                  onClick={handleJoinClass}
+                  onKeyDown={e => e.key === 'Enter' && handleJoinClass()}
+                  className="flex-1 px-4 py-2.5 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#5B9BD5] uppercase transition-colors"/>
+                <button onClick={handleJoinClass}
                   disabled={joiningClass || !classCode.trim()}
-                  className="px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors"
-                >
+                  className="px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors">
                   {joiningClass ? '...' : 'Join'}
                 </button>
               </div>
@@ -552,91 +631,16 @@ export default function Home({ profile, onNavigate }) {
             <div className="f4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-4 flex items-center gap-3">
               <div className="text-[#70AD47]">{Icons.check}</div>
               <p className="text-[13px] font-semibold text-[#336b07]">
-                You have joined the class. Your teacher's materials will appear in My Subjects.
+                You joined the class. Your teacher's materials will appear in My Subjects.
               </p>
             </div>
           )}
 
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div className="lg:w-[280px] flex flex-col gap-4">
-
-          {/* STATS */}
-          <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5">
-            <h3 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Your Stats</h3>
-            <div className="flex flex-col gap-4">
-              {[
-                { label: 'Topics Done', value: loading ? '...' : stats.completed.toString(), color: '#136299', bg: '#EFF6FF', icon: Icons.check },
-                { label: 'Day Streak', value: loading ? '...' : `${stats.streak}`, color: '#70AD47', bg: '#F0FDF4', icon: Icons.flame },
-                { label: 'Avg Score', value: loading ? '...' : stats.avgScore > 0 ? `${stats.avgScore}%` : '—', color: '#F59E0B', bg: '#FFFBEB', icon: Icons.star },
-              ].map((s, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: s.bg, color: s.color }}>
-                    {s.icon}
-                  </div>
-                  <div>
-                    <p className="text-[22px] font-extrabold leading-none" style={{ color: s.color }}>{s.value}</p>
-                    <p className="text-[12px] text-[#94A3B8] mt-0.5">{s.label}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* BADGES */}
-          <div className="f3 bg-white border border-[#E4E7EC] rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="text-[#F59E0B]">{Icons.trophy}</div>
-              <h3 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest">Badges</h3>
-            </div>
-            {stats.completed === 0 ? (
-              <p className="text-[13px] text-[#94A3B8] leading-[1.6]">
-                Complete your first lesson to earn your first badge.
-              </p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {stats.completed >= 1 && (
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">{Icons.star}</div>
-                    <div>
-                      <p className="text-[13px] font-bold text-[#1E293B]">First Step</p>
-                      <p className="text-[11px] text-[#94A3B8]">Completed your first lesson</p>
-                    </div>
-                  </div>
-                )}
-                {stats.completed >= 3 && (
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">{Icons.star}</div>
-                    <div>
-                      <p className="text-[13px] font-bold text-[#1E293B]">On a Roll</p>
-                      <p className="text-[11px] text-[#94A3B8]">Completed 3 topics</p>
-                    </div>
-                  </div>
-                )}
-                {stats.streak >= 3 && (
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[#FFFBEB] flex items-center justify-center text-[#F59E0B] flex-shrink-0">{Icons.flame}</div>
-                    <div>
-                      <p className="text-[13px] font-bold text-[#1E293B]">Consistent</p>
-                      <p className="text-[11px] text-[#94A3B8]">3 day learning streak</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* DAILY TIP */}
-          <div className="f4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="text-[#336b07]">{Icons.lightbulb}</div>
-              <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
-            </div>
-            <p className="text-[13px] text-[#1E293B] leading-[1.7]">{tip}</p>
-          </div>
-
+        {/* RIGHT SIDEBAR */}
+        <div className="lg:w-[280px]">
+          <StatsSidebar/>
         </div>
       </div>
     </div>

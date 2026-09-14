@@ -45,10 +45,8 @@ const Icons = {
   ),
   math: (
     <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <line x1="12" y1="5" x2="12" y2="19"/>
-      <line x1="5" y1="12" x2="19" y2="12"/>
-      <line x1="5" y1="5" x2="8" y2="8"/>
-      <line x1="16" y1="16" x2="19" y2="19"/>
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      <line x1="5" y1="5" x2="8" y2="8"/><line x1="16" y1="16" x2="19" y2="19"/>
     </svg>
   ),
   english: (
@@ -87,48 +85,82 @@ export default function TopicsList() {
   }, [decodedSubject]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchTopics = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
 
-    const { data: topicsData } = await supabase
-      .from('topics')
-      .select('*')
-      .eq('subject', decodedSubject)
-      .order('order_index', { ascending: true });
+      const { data: topicsData } = await supabase
+        .from('topics')
+        .select('*')
+        .eq('subject', decodedSubject)
+        .order('order_index', { ascending: true });
 
-    const { data: progressData } = await supabase
-      .from('student_progress')
-      .select('*')
-      .eq('student_id', user.id);
+      const { data: progressData } = await supabase
+        .from('student_progress')
+        .select('*')
+        .eq('student_id', user.id);
 
-    const progressMap = {};
-    progressData?.forEach(p => {
-      progressMap[p.topic_id] = p;
-    });
+      const progressMap = {};
+      progressData?.forEach(p => { progressMap[p.topic_id] = p; });
 
-    setTopics(topicsData || []);
-    setProgress(progressMap);
-    setLoading(false);
+      setTopics(topicsData || []);
+      setProgress(progressMap);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getTopicStatus = (topic, index) => {
     const p = progress[topic.id];
     if (p?.completed) return 'completed';
     if (p?.level_reached > 0) return 'inprogress';
+
+    // First topic always available
     if (index === 0) return 'available';
+
+    // Check if previous topic is completed OR has been started
     const prevTopic = topics[index - 1];
-    if (prevTopic && progress[prevTopic.id]?.completed) return 'available';
+    if (prevTopic) {
+      const prevProgress = progress[prevTopic.id];
+      // Unlock if previous topic is completed
+      if (prevProgress?.completed) return 'available';
+      // Also unlock if previous topic has no quiz questions
+      // (AI-generated topics) — check level_reached >= 3
+      if (prevProgress?.level_reached >= 3) return 'available';
+    }
+
     return 'upcoming';
   };
 
   const completedCount = topics.filter(t => progress[t.id]?.completed).length;
-  const currentTopicIndex = topics.findIndex((t, i) => getTopicStatus(t, i) === 'inprogress' || getTopicStatus(t, i) === 'available');
+  const currentTopicIndex = topics.findIndex((t, i) => {
+    const status = getTopicStatus(t, i);
+    return status === 'inprogress' || status === 'available';
+  });
   const currentTopic = topics[currentTopicIndex];
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
-        <p className="text-[14px] text-[#475467]">Loading topics...</p>
+      <div className="min-h-screen bg-[#F8FAFC]">
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+          * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        `}</style>
+        <header className="bg-white border-b border-[#E4E7EC] h-[60px]"/>
+        <div className="max-w-[720px] mx-auto px-5 md:px-8 py-8 flex flex-col gap-4">
+          {[1,2,3].map(i => (
+            <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5 animate-pulse">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-[#F1F5F9]"/>
+                <div className="flex-1">
+                  <div className="w-48 h-4 bg-[#F1F5F9] rounded mb-2"/>
+                  <div className="w-32 h-3 bg-[#F1F5F9] rounded"/>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -138,17 +170,11 @@ export default function TopicsList() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         * { font-family: 'Plus Jakarta Sans', sans-serif; }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         .f1 { animation: fadeUp 0.4s ease forwards; }
         .f2 { animation: fadeUp 0.4s 0.08s ease both; }
         .f3 { animation: fadeUp 0.4s 0.16s ease both; }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .pulse { animation: pulse 2s ease infinite; }
         .progress-bar { transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
       `}</style>
@@ -156,10 +182,8 @@ export default function TopicsList() {
       {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[720px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
-          <button
-            onClick={() => navigate('/dashboard/student')}
-            className="flex items-center gap-2 text-[14px] font-medium text-[#475467] hover:text-[#1E293B] transition-colors"
-          >
+          <button onClick={() => navigate('/dashboard/student')}
+            className="flex items-center gap-2 text-[14px] font-medium text-[#475467] hover:text-[#1E293B] transition-colors">
             {Icons.back} Back to Dashboard
           </button>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-bold"
@@ -192,46 +216,42 @@ export default function TopicsList() {
               return (
                 <React.Fragment key={t.id}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold transition-all ${
-                    status === 'completed'
-                      ? 'text-white'
-                      : status === 'inprogress' || status === 'available'
-                      ? 'text-white pulse'
-                      : 'bg-[#F1F5F9] text-[#94A3B8]'
+                    status === 'completed' ? 'text-white'
+                    : status === 'inprogress' || status === 'available' ? 'text-white pulse'
+                    : 'bg-[#F1F5F9] text-[#94A3B8]'
                   }`}
                     style={
-                      status === 'completed'
-                        ? { background: config.color }
-                        : status === 'inprogress' || status === 'available'
-                        ? { background: config.color, opacity: 0.7 }
-                        : {}
+                      status === 'completed' ? { background: config.color }
+                      : status === 'inprogress' || status === 'available'
+                      ? { background: config.color, opacity: 0.7 }
+                      : {}
                     }
                   >
                     {status === 'completed' ? Icons.check : i + 1}
                   </div>
                   {i < topics.length - 1 && (
                     <div className="flex-1 h-0.5 rounded-full"
-                      style={{ background: status === 'completed' ? config.color : '#E4E7EC' }}
-                    />
+                      style={{ background: status === 'completed' ? config.color : '#E4E7EC' }}/>
                   )}
                 </React.Fragment>
               );
             })}
           </div>
+
+          {/* Progress bar */}
           <div className="bg-[#F1F5F9] rounded-full h-2 mt-2">
-            <div
-              className="h-2 rounded-full progress-bar"
+            <div className="h-2 rounded-full progress-bar"
               style={{
                 width: `${topics.length > 0 ? (completedCount / topics.length) * 100 : 0}%`,
                 background: config.color
-              }}
-            />
+              }}/>
           </div>
           <p className="text-[12px] text-[#94A3B8] mt-2">
             {completedCount === 0
-              ? "You're just getting started. No pressure — take it one step at a time."
+              ? "You are just getting started. No pressure — take it one step at a time."
               : completedCount === topics.length
-              ? "You've completed all topics in this subject. Amazing work!"
-              : `${topics.length - completedCount} topics remaining. You're doing great.`}
+              ? "You have completed all topics in this subject. Amazing work!"
+              : `${topics.length - completedCount} topics remaining. You are doing great.`}
           </p>
         </div>
 
@@ -258,12 +278,30 @@ export default function TopicsList() {
               </div>
               <div className="flex items-center gap-1.5 text-[#475467]">
                 <span style={{ color: config.color }}>{Icons.voice}</span>
-                <span className="text-[12px] font-medium">Voice support available</span>
+                <span className="text-[12px] font-medium">Voice support</span>
               </div>
             </div>
+
+            {/* Show level progress if in progress */}
+            {progress[currentTopic.id]?.level_reached > 0 && !progress[currentTopic.id]?.completed && (
+              <div className="flex items-center gap-3 mb-5">
+                <div className="flex gap-1.5">
+                  {[1,2,3,4].map(l => (
+                    <div key={l} className="w-6 h-1.5 rounded-full"
+                      style={{
+                        background: l <= progress[currentTopic.id].level_reached ? config.color : '#E4E7EC'
+                      }}/>
+                  ))}
+                </div>
+                <span className="text-[12px] text-[#475467]">
+                  Level {progress[currentTopic.id].level_reached} of 4
+                </span>
+              </div>
+            )}
+
             <button
               onClick={() => navigate(`/lesson/${currentTopic.id}`)}
-              className="flex items-center gap-2 px-8 py-3.5 text-white text-[15px] font-bold rounded-xl transition-colors shadow-sm"
+              className="flex items-center gap-2 px-8 py-3.5 text-white text-[15px] font-bold rounded-xl transition-colors shadow-sm active:scale-[0.98]"
               style={{ background: config.color }}
             >
               {progress[currentTopic.id]?.level_reached > 0 ? 'Continue Lesson' : 'Start Lesson'}
@@ -279,6 +317,7 @@ export default function TopicsList() {
             {topics.map((topic, index) => {
               const status = getTopicStatus(topic, index);
               const isCurrent = topic.id === currentTopic?.id;
+              const p = progress[topic.id];
 
               return (
                 <div
@@ -294,17 +333,13 @@ export default function TopicsList() {
                   style={isCurrent ? { borderColor: config.color } : {}}
                 >
                   {/* Status indicator */}
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-[13px] font-bold ${
-                    status === 'completed'
-                      ? 'text-white'
-                      : status === 'inprogress' || status === 'available'
-                      ? 'text-white'
-                      : 'bg-[#F1F5F9] text-[#94A3B8]'
-                  }`}
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-[13px] font-bold`}
                     style={
-                      status === 'completed' || status === 'inprogress' || status === 'available'
-                        ? { background: status === 'completed' ? config.color : config.bg, color: status === 'completed' ? 'white' : config.color }
-                        : {}
+                      status === 'completed'
+                        ? { background: config.color, color: 'white' }
+                        : status === 'inprogress' || status === 'available'
+                        ? { background: config.bg, color: config.color }
+                        : { background: '#F1F5F9', color: '#94A3B8' }
                     }
                   >
                     {status === 'completed' ? Icons.check : status === 'upcoming' ? Icons.lock : index + 1}
@@ -312,7 +347,7 @@ export default function TopicsList() {
 
                   {/* Topic info */}
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <p className={`text-[14px] font-bold ${status === 'upcoming' ? 'text-[#94A3B8]' : 'text-[#0F172A]'}`}>
                         {topic.title}
                       </p>
@@ -325,20 +360,18 @@ export default function TopicsList() {
                     </div>
                     <p className="text-[12px] text-[#94A3B8] mt-0.5">
                       {status === 'completed'
-                        ? 'Completed'
+                        ? `Completed${p?.score ? ` · Score: ${p.score}%` : ''}`
                         : status === 'inprogress'
-                        ? 'In progress'
+                        ? `Level ${p?.level_reached || 1} of 4 · In progress`
                         : status === 'upcoming'
                         ? 'Complete previous topic first'
                         : 'Ready to start'}
                     </p>
                   </div>
 
-                  {/* Action */}
+                  {/* Arrow */}
                   {status !== 'upcoming' && (
-                    <div style={{ color: config.color }}>
-                      {Icons.arrow}
-                    </div>
+                    <div style={{ color: config.color }}>{Icons.arrow}</div>
                   )}
                 </div>
               );

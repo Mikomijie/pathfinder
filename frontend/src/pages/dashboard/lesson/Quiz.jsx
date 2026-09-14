@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient';
 
@@ -18,9 +18,31 @@ const Icons = {
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
     </svg>
   ),
+  emptyStar: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+    </svg>
+  ),
   arrow: (
     <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M3 8h10M9 4l4 4-4 4"/>
+    </svg>
+  ),
+  flashcard: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="2" y="5" width="20" height="14" rx="2"/>
+      <line x1="2" y1="10" x2="22" y2="10"/>
+    </svg>
+  ),
+  refresh: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="23 4 23 10 17 10"/>
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+    </svg>
+  ),
+  confetti: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5L12 2z"/>
     </svg>
   ),
 };
@@ -40,49 +62,74 @@ export default function Quiz() {
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [score, setScore] = useState(0);
+  const [answers, setAnswers] = useState([]); // track all answers
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [nextTopic, setNextTopic] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchQuiz();
   }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchQuiz = async () => {
-    const { data: topicData } = await supabase
-      .from('topics').select('*').eq('id', topicId).single();
+    try {
+      const { data: topicData } = await supabase
+        .from('topics').select('*').eq('id', topicId).single();
+      setTopic(topicData);
 
-    const { data: questionsData } = await supabase
-      .from('quiz_questions')
-      .select('*')
-      .eq('topic_id', topicId)
-      .limit(3);
+      const { data: questionsData } = await supabase
+        .from('quiz_questions')
+        .select('*')
+        .eq('topic_id', topicId)
+        .limit(3);
+      setQuestions(questionsData || []);
 
-    setTopic(topicData);
-    setQuestions(questionsData || []);
-    setLoading(false);
-  };
-
-  const handleAnswer = async (index) => {
-    if (showAnswer) return;
-    setSelectedAnswer(index);
-    setShowAnswer(true);
-
-    const q = questions[currentQ];
-    const correctIndex = ['A','B','C','D'].indexOf(q.answer);
-    if (index === correctIndex) {
-      setScore(prev => prev + 1);
+      // Fetch next topic
+      if (topicData) {
+        const { data: nextTopics } = await supabase
+          .from('topics')
+          .select('*')
+          .eq('subject', topicData.subject)
+          .gt('order_index', topicData.order_index)
+          .order('order_index', { ascending: true })
+          .limit(1);
+        if (nextTopics && nextTopics.length > 0) {
+          setNextTopic(nextTopics[0]);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
+  const handleAnswer = (index) => {
+    if (showAnswer) return;
+    setSelectedAnswer(index);
+    setShowAnswer(true);
+  };
+
   const handleNext = async () => {
+    const q = questions[currentQ];
+    const correctIndex = ['A','B','C','D'].indexOf(q.answer);
+    const isCorrect = selectedAnswer === correctIndex;
+
+    // Record this answer
+    const newAnswers = [...answers, { correct: isCorrect }];
+    setAnswers(newAnswers);
+
     if (currentQ < questions.length - 1) {
       setCurrentQ(prev => prev + 1);
       setSelectedAnswer(null);
       setShowAnswer(false);
     } else {
-      // Quiz complete — mark topic as done
-      setFinished(true);
+      // Quiz complete — calculate final score from all answers
+      setSaving(true);
+      const totalCorrect = newAnswers.filter(a => a.correct).length;
+      const scorePercent = Math.round((totalCorrect / questions.length) * 100);
+
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -92,11 +139,14 @@ export default function Quiz() {
             level_reached: 4,
             completed: true,
             last_studied_at: new Date().toISOString(),
-            score: Math.round(((score + (selectedAnswer === ['A','B','C','D'].indexOf(questions[currentQ].answer) ? 1 : 0)) / questions.length) * 100),
+            score: scorePercent,
           }, { onConflict: 'student_id,topic_id' });
         }
       } catch (err) {
         console.error(err);
+      } finally {
+        setSaving(false);
+        setFinished(true);
       }
     }
   };
@@ -104,14 +154,25 @@ export default function Quiz() {
   const color = topic ? (subjectColor[topic.subject] || '#5B9BD5') : '#5B9BD5';
   const q = questions[currentQ];
   const correctIndex = q ? ['A','B','C','D'].indexOf(q.answer) : -1;
-  const finalScore = finished ? score : 0;
+
+  // Calculate final score properly from answers array
+  const finalScore = answers.filter(a => a.correct).length;
   const percentage = questions.length > 0 ? Math.round((finalScore / questions.length) * 100) : 0;
+  const stars = finalScore === questions.length ? 3 : finalScore >= Math.ceil(questions.length / 2) ? 2 : 1;
 
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
-        <p className="text-[14px] text-[#475467]">Loading quiz...</p>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+          * { font-family: 'Plus Jakarta Sans', sans-serif; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-[#E4E7EC]"
+            style={{ borderTopColor: '#5B9BD5', animation: 'spin 1s linear infinite' }}/>
+          <p className="text-[14px] text-[#475467]">Loading quiz...</p>
+        </div>
       </div>
     );
   }
@@ -121,14 +182,32 @@ export default function Quiz() {
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
         <div className="text-center max-w-[400px]">
-          <h2 className="text-[22px] font-extrabold text-[#0F172A] mb-3">No questions yet</h2>
-          <p className="text-[14px] text-[#475467] mb-6">This topic doesn't have quiz questions yet.</p>
-          <button
-            onClick={() => navigate('/dashboard/student')}
-            className="px-8 py-3 bg-[#136299] text-white font-bold rounded-xl"
-          >
-            Back to Dashboard
-          </button>
+          <div className="w-16 h-16 rounded-2xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-4 text-[#70AD47]">
+            {Icons.check}
+          </div>
+          <h2 className="text-[22px] font-extrabold text-[#0F172A] mb-2">Lesson Complete!</h2>
+          <p className="text-[14px] text-[#475467] mb-6 leading-[1.7]">
+            No quiz questions for this topic yet. Your progress has been saved.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button onClick={() => navigate(`/flashcards/${topicId}`)}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
+              {Icons.flashcard} Study Flashcards
+            </button>
+            {nextTopic ? (
+              <button onClick={() => navigate(`/lesson/${nextTopic.id}`)}
+                className="flex items-center justify-center gap-2 px-6 py-3 text-white text-[14px] font-bold rounded-xl transition-colors"
+                style={{ background: color }}>
+                Next Topic {Icons.arrow}
+              </button>
+            ) : (
+              <button onClick={() => navigate('/dashboard/student')}
+                className="flex items-center justify-center gap-2 px-6 py-3 text-white text-[14px] font-bold rounded-xl transition-colors"
+                style={{ background: color }}>
+                Dashboard {Icons.arrow}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -138,77 +217,92 @@ export default function Quiz() {
   if (finished) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+          * { font-family: 'Plus Jakarta Sans', sans-serif; }
           @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-          .fade { animation: fadeUp 0.5s ease forwards; }
-          .fade2 { animation: fadeUp 0.5s 0.15s ease both; }
-          .fade3 { animation: fadeUp 0.5s 0.3s ease both; }
+          @keyframes pop { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
+          .f1 { animation: fadeUp 0.5s ease forwards; }
+          .f2 { animation: fadeUp 0.5s 0.1s ease both; }
+          .f3 { animation: fadeUp 0.5s 0.2s ease both; }
+          .f4 { animation: fadeUp 0.5s 0.3s ease both; }
+          .pop { animation: pop 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
         `}</style>
+
         <div className="text-center max-w-[480px] w-full">
 
           {/* Score circle */}
-          <div className="fade w-28 h-28 rounded-full flex items-center justify-center mx-auto mb-6 border-4"
+          <div className="pop w-28 h-28 rounded-full flex items-center justify-center mx-auto mb-5 border-4"
             style={{ borderColor: color, background: `${color}15` }}>
             <div>
-              <p className="text-[32px] font-extrabold" style={{ color }}>{score}/{questions.length}</p>
+              <p className="text-[32px] font-extrabold leading-none" style={{ color }}>{finalScore}/{questions.length}</p>
+              <p className="text-[11px] text-[#94A3B8] font-medium mt-0.5">correct</p>
             </div>
           </div>
 
           {/* Stars */}
-          <div className="fade flex items-center justify-center gap-2 mb-4">
+          <div className="f1 flex items-center justify-center gap-2 mb-4">
             {[1,2,3].map(i => (
-              <span key={i} className={`${i <= Math.ceil(score / questions.length * 3) ? '' : 'opacity-20'}`}
-                style={{ color: '#F59E0B' }}>
-                {Icons.star}
+              <span key={i} style={{ color: i <= stars ? '#F59E0B' : '#E4E7EC' }}>
+                {i <= stars ? Icons.star : Icons.emptyStar}
               </span>
             ))}
           </div>
 
-          <h1 className="fade text-[28px] font-extrabold text-[#0F172A] mb-2">
-            {score === questions.length ? 'Perfect score!' : score >= questions.length / 2 ? 'Well done!' : 'Good effort!'}
+          <h1 className="f1 text-[28px] font-extrabold text-[#0F172A] mb-2">
+            {finalScore === questions.length ? 'Perfect score!' : finalScore >= Math.ceil(questions.length / 2) ? 'Well done!' : 'Good effort!'}
           </h1>
-          <p className="fade2 text-[15px] text-[#475467] leading-[1.7] mb-2">
-            You got <span className="font-bold" style={{ color }}>{score} out of {questions.length}</span> correct.
+
+          <p className="f2 text-[14px] text-[#475467] leading-[1.7] mb-2">
+            You got <span className="font-bold" style={{ color }}>{finalScore} out of {questions.length}</span> correct.
           </p>
-          <p className="fade2 text-[13px] text-[#94A3B8] mb-8">
-            {score === questions.length
-              ? 'You understood this topic completely. Amazing work.'
-              : score >= questions.length / 2
-              ? 'You are getting there. Review the lesson and try again anytime.'
-              : 'No worries — go back to the lesson and try again. There is no rush.'}
+          <p className="f2 text-[13px] text-[#94A3B8] mb-6 leading-[1.6]">
+            {finalScore === questions.length
+              ? 'You understood this topic completely. Keep going — the next one is ready.'
+              : finalScore >= Math.ceil(questions.length / 2)
+              ? 'You are making great progress. Review the lesson anytime.'
+              : 'No worries at all — go back to the lesson and try again. There is no rush.'}
           </p>
 
-          {/* Badge */}
-          <div className="fade2 bg-white border border-[#E4E7EC] rounded-2xl p-5 mb-6 flex items-center gap-4">
+          {/* Topic complete badge */}
+          <div className="f3 bg-white border border-[#E4E7EC] rounded-2xl p-5 mb-5 flex items-center gap-4 text-left">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
               style={{ background: color }}>
               {Icons.check}
             </div>
-            <div className="text-left">
+            <div>
               <p className="text-[14px] font-bold text-[#0F172A]">Topic Complete</p>
               <p className="text-[12px] text-[#94A3B8]">{topic?.title} — {topic?.subject}</p>
             </div>
           </div>
 
-          <div className="fade3 flex flex-col sm:flex-row gap-3 justify-center">
-            <button
-  onClick={() => navigate(`/lesson/${topicId}`)}
-  className="px-6 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors"
->
-  Review Lesson
-</button>
-<button
-  onClick={() => navigate(`/flashcards/${topicId}`)}
-  className="px-6 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors"
->
-  Study Flashcards
-</button>
-            <button
-              onClick={() => navigate('/dashboard/student')}
-              className="px-6 py-3 text-white text-[14px] font-bold rounded-xl transition-colors"
-              style={{ background: color }}
-            >
-              Back to Dashboard {Icons.arrow}
+          {/* NEXT TOPIC CARD */}
+          {nextTopic && (
+            <div className="f3 bg-[#0F172A] rounded-2xl p-5 mb-5 text-left">
+              <p className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest mb-2">Up next</p>
+              <p className="text-[16px] font-bold text-white mb-1">{nextTopic.title}</p>
+              <p className="text-[12px] text-[#64748B] mb-4">{nextTopic.subject}</p>
+              <button onClick={() => navigate(`/lesson/${nextTopic.id}`)}
+                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors">
+                Start Next Topic {Icons.arrow}
+              </button>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="f4 flex flex-col sm:flex-row gap-3 justify-center">
+            <button onClick={() => navigate(`/lesson/${topicId}`)}
+              className="flex items-center justify-center gap-2 px-5 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
+              {Icons.refresh} Review Lesson
+            </button>
+            <button onClick={() => navigate(`/flashcards/${topicId}`)}
+              className="flex items-center justify-center gap-2 px-5 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
+              {Icons.flashcard} Study Flashcards
+            </button>
+            <button onClick={() => navigate('/dashboard/student')}
+              className="flex items-center justify-center gap-2 px-5 py-3 text-white text-[14px] font-bold rounded-xl transition-colors"
+              style={{ background: color }}>
+              Dashboard {Icons.arrow}
             </button>
           </div>
         </div>
@@ -229,23 +323,31 @@ export default function Quiz() {
       {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[680px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
-          <button
-            onClick={() => navigate(`/lesson/${topicId}`)}
-            className="flex items-center gap-2 text-[14px] font-medium text-[#475467] hover:text-[#1E293B]"
-          >
+          <button onClick={() => navigate(`/lesson/${topicId}`)}
+            className="flex items-center gap-2 text-[14px] font-medium text-[#475467] hover:text-[#1E293B] transition-colors">
             {Icons.back} Back to Lesson
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="text-[13px] font-semibold text-[#475467]">
               Question {currentQ + 1} of {questions.length}
             </span>
             <div className="flex gap-1.5">
               {questions.map((_, i) => (
                 <div key={i} className="w-2 h-2 rounded-full transition-all"
-                  style={{ background: i < currentQ ? '#70AD47' : i === currentQ ? color : '#E4E7EC' }}/>
+                  style={{
+                    background: i < currentQ
+                      ? (answers[i]?.correct ? '#70AD47' : '#BA1A1A')
+                      : i === currentQ ? color : '#E4E7EC'
+                  }}/>
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-1 bg-[#F1F5F9]">
+          <div className="h-1 transition-all duration-500"
+            style={{ width: `${((currentQ) / questions.length) * 100}%`, background: color }}/>
         </div>
       </header>
 
@@ -261,7 +363,7 @@ export default function Quiz() {
           </h1>
         </div>
 
-        {/* Options */}
+        {/* OPTIONS */}
         <div className="flex flex-col gap-3">
           {q && [q.option_a, q.option_b, q.option_c, q.option_d].map((option, i) => {
             const isSelected = selectedAnswer === i;
@@ -279,13 +381,9 @@ export default function Quiz() {
             }
 
             return (
-              <button
-                key={i}
-                onClick={() => handleAnswer(i)}
-                disabled={showAnswer}
-                className="flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all"
-                style={{ borderColor, backgroundColor: bgColor }}
-              >
+              <button key={i} onClick={() => handleAnswer(i)} disabled={showAnswer}
+                className="flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all active:scale-[0.99]"
+                style={{ borderColor, backgroundColor: bgColor }}>
                 <div className="w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 border-2"
                   style={{ borderColor, color: textColor }}>
                   {['A','B','C','D'][i]}
@@ -294,19 +392,17 @@ export default function Quiz() {
                   {option}
                 </span>
                 {showAnswer && isCorrect && (
-                  <span className="ml-auto text-[#70AD47]">{Icons.check}</span>
+                  <span className="ml-auto text-[#70AD47] flex-shrink-0">{Icons.check}</span>
                 )}
               </button>
             );
           })}
         </div>
 
-        {/* Feedback */}
+        {/* FEEDBACK */}
         {showAnswer && (
-          <div className={`p-4 rounded-xl border ${
-            selectedAnswer === correctIndex
-              ? 'bg-[#F0FDF4] border-[#BBF7D0]'
-              : 'bg-[#FFF1F1] border-[#FFCDD2]'
+          <div className={`fade p-4 rounded-xl border ${
+            selectedAnswer === correctIndex ? 'bg-[#F0FDF4] border-[#BBF7D0]' : 'bg-[#FFF1F1] border-[#FFCDD2]'
           }`}>
             <p className="text-[14px] font-bold mb-1" style={{
               color: selectedAnswer === correctIndex ? '#336b07' : '#BA1A1A'
@@ -314,16 +410,18 @@ export default function Quiz() {
               {selectedAnswer === correctIndex ? 'That is correct!' : 'Not quite — but that is okay.'}
             </p>
             <p className="text-[13px] text-[#1E293B] leading-[1.6]">
-              The correct answer is <span className="font-bold">{['A','B','C','D'][correctIndex]}: {[q.option_a, q.option_b, q.option_c, q.option_d][correctIndex]}</span>
+              The correct answer is <span className="font-bold">
+                {['A','B','C','D'][correctIndex]}: {[q.option_a, q.option_b, q.option_c, q.option_d][correctIndex]}
+              </span>
             </p>
           </div>
         )}
 
-        {/* Encouragement */}
+        {/* ENCOURAGEMENT */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B]">
-            Take your time. There is no rush and no penalty for wrong answers.
+            Take your time. There is no penalty for wrong answers.
           </p>
         </div>
 
@@ -333,12 +431,10 @@ export default function Quiz() {
       {showAnswer && (
         <div className="bg-white border-t border-[#E4E7EC] sticky bottom-0">
           <div className="max-w-[680px] mx-auto px-5 md:px-8 py-4 flex justify-end">
-            <button
-              onClick={handleNext}
+            <button onClick={handleNext} disabled={saving}
               className="flex items-center gap-2 px-8 py-3 text-white text-[14px] font-bold rounded-xl transition-colors"
-              style={{ background: color }}
-            >
-              {currentQ < questions.length - 1 ? 'Next Question' : 'See Results'}
+              style={{ background: color }}>
+              {saving ? 'Saving...' : currentQ < questions.length - 1 ? 'Next Question' : 'See Results'}
               {Icons.arrow}
             </button>
           </div>

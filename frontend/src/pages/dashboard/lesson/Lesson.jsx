@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient';
 
@@ -37,6 +37,17 @@ const Icons = {
       <polyline points="20 6 9 17 4 12"/>
     </svg>
   ),
+  star: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+    </svg>
+  ),
+  flashcard: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="2" y="5" width="20" height="14" rx="2"/>
+      <line x1="2" y1="10" x2="22" y2="10"/>
+    </svg>
+  ),
 };
 
 const levelLabels = {
@@ -52,6 +63,7 @@ const subjectColor = {
   'Basic Science': '#F59E0B',
 };
 
+// SVG VISUALS FOR LEVEL 3
 const TopicVisuals = {
   'Introduction to Fractions': (
     <div className="flex flex-col items-center gap-6">
@@ -327,7 +339,6 @@ const TopicVisuals = {
   ),
 };
 
-// For PDF/unknown topics — generic visual layout
 function GenericVisual({ text }) {
   const lines = (text || '').split('\n').filter(l => l.trim()).slice(0, 8);
   return (
@@ -338,7 +349,7 @@ function GenericVisual({ text }) {
           <div className="w-7 h-7 rounded-full bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] text-[12px] font-bold flex-shrink-0">
             {i + 1}
           </div>
-          <p className="text-[14px] text-[#1E293B] leading-[1.6]">{line.replace(/^[-*•]\s*/, '').trim()}</p>
+          <p className="text-[14px] text-[#1E293B] leading-[1.6]">{line.replace(/^[-*•]\s*/, '').replace(/^Step \d+:\s*/i, '').trim()}</p>
         </div>
       ))}
     </div>
@@ -358,6 +369,9 @@ export default function Lesson() {
   const [quizQuestion, setQuizQuestion] = useState(null);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [nextTopic, setNextTopic] = useState(null);
+  const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
 
   useEffect(() => {
     fetchLesson();
@@ -365,8 +379,8 @@ export default function Lesson() {
   }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (currentLevel === 4) fetchQuizQuestion();
-  }, [currentLevel]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (currentLevel === 4 && lesson) fetchQuizQuestion();
+  }, [currentLevel, lesson]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchLesson = async () => {
     try {
@@ -377,6 +391,7 @@ export default function Lesson() {
         .from('lessons').select('*').eq('topic_id', topicId).single();
 
       const { data: { user } } = await supabase.auth.getUser();
+
       if (user) {
         const { data: progressData } = await supabase
           .from('student_progress')
@@ -384,7 +399,30 @@ export default function Lesson() {
           .eq('student_id', user.id)
           .eq('topic_id', topicId)
           .maybeSingle();
-        if (progressData?.level_reached) setCurrentLevel(progressData.level_reached);
+
+        if (progressData) {
+          if (progressData.completed) {
+            setIsCompleted(true);
+            setCurrentLevel(progressData.level_reached || 4);
+          } else if (progressData.level_reached) {
+            setCurrentLevel(progressData.level_reached);
+          }
+        }
+
+        // Fetch next topic in same subject
+        if (topicData) {
+          const { data: nextTopics } = await supabase
+            .from('topics')
+            .select('*')
+            .eq('subject', topicData.subject)
+            .gt('order_index', topicData.order_index)
+            .order('order_index', { ascending: true })
+            .limit(1);
+
+          if (nextTopics && nextTopics.length > 0) {
+            setNextTopic(nextTopics[0]);
+          }
+        }
       }
 
       setTopic(topicData);
@@ -397,31 +435,35 @@ export default function Lesson() {
   };
 
   const fetchQuizQuestion = async () => {
-  try {
-    const { data } = await supabase
-      .from('quiz_questions')
-      .select('*')
-      .eq('topic_id', topicId)
-      .limit(5);
+    try {
+      const { data } = await supabase
+        .from('quiz_questions')
+        .select('*')
+        .eq('topic_id', topicId)
+        .limit(5);
 
-    if (data && data.length > 0) {
-      const random = data[Math.floor(Math.random() * data.length)];
-      setQuizQuestion({
-        question: random.question,
-        options: [random.option_a, random.option_b, random.option_c, random.option_d],
-        answer: ['A','B','C','D'].indexOf(random.answer),
-        explanation: `The correct answer is option ${random.answer}.`
-      });
-    } else if (lesson) {
-      // AI-generated topic — generate question from OpenRouter
-      const { generateInteractiveQuestion } = await import('../../../services/openrouter');
-      const q = await generateInteractiveQuestion(topic?.title, lesson?.level_1);
-      if (q) setQuizQuestion(q);
+      if (data && data.length > 0) {
+        const random = data[Math.floor(Math.random() * data.length)];
+        setQuizQuestion({
+          question: random.question,
+          options: [random.option_a, random.option_b, random.option_c, random.option_d],
+          answer: ['A','B','C','D'].indexOf(random.answer),
+          explanation: `The correct answer is option ${random.answer}.`
+        });
+      } else if (lesson) {
+        // AI-generated topic — generate question via OpenRouter
+        try {
+          const { generateInteractiveQuestion } = await import('../../../services/openrouter');
+          const q = await generateInteractiveQuestion(topic?.title, lesson?.level_1);
+          if (q) setQuizQuestion(q);
+        } catch {
+          // Silently fail — show nothing rather than crash
+        }
+      }
+    } catch (err) {
+      console.error(err);
     }
-  } catch (err) {
-    console.error(err);
-  }
-};
+  };
 
   const getCurrentText = () => {
     if (!lesson) return '';
@@ -437,17 +479,14 @@ export default function Lesson() {
     }
     const text = currentLevel === 4 && quizQuestion ? quizQuestion.question : getCurrentText();
     const utterance = new SpeechSynthesisUtterance(text);
-utterance.rate = 0.75;
-utterance.pitch = 1;
-
-const voices = window.speechSynthesis.getVoices();
-const preferred = voices.find(v =>
-  v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
-) || voices.find(v => v.lang.startsWith('en')) || voices[0];
-
-if (preferred) utterance.voice = preferred;
-utterance.onend = () => setSpeaking(false);
-window.speechSynthesis.speak(utterance);
+    utterance.rate = voiceSpeed;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v =>
+      v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
+    ) || voices.find(v => v.lang.startsWith('en'));
+    if (preferred) utterance.voice = preferred;
+    utterance.onend = () => setSpeaking(false);
+    window.speechSynthesis.speak(utterance);
     setSpeaking(true);
   };
 
@@ -457,16 +496,17 @@ window.speechSynthesis.speak(utterance);
     setCurrentLevel(newLevel);
     setSpeaking(false);
     window.speechSynthesis?.cancel();
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       await supabase.from('student_progress').upsert({
-  student_id: user.id,
-  topic_id: topicId,
-  level_reached: newLevel,
-  completed: false,
-  last_studied_at: new Date().toISOString(),
-}, { onConflict: 'student_id,topic_id' });
+        student_id: user.id,
+        topic_id: topicId,
+        level_reached: newLevel,
+        completed: false,
+        last_studied_at: new Date().toISOString(),
+      }, { onConflict: 'student_id,topic_id' });
     } catch (err) {
       console.error(err);
     }
@@ -476,20 +516,22 @@ window.speechSynthesis.speak(utterance);
     setUnderstood(true);
     window.speechSynthesis?.cancel();
     setSpeaking(false);
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       await supabase.from('student_progress').upsert({
-  student_id: user.id,
-  topic_id: topicId,
-  level_reached: currentLevel,
-  completed: false,
-  last_studied_at: new Date().toISOString(),
-}, { onConflict: 'student_id,topic_id' });
+        student_id: user.id,
+        topic_id: topicId,
+        level_reached: currentLevel,
+        completed: false,
+        last_studied_at: new Date().toISOString(),
+      }, { onConflict: 'student_id,topic_id' });
     } catch (err) {
       console.error(err);
     }
-    setTimeout(() => navigate(`/lesson/${topicId}/quiz`), 800);
+
+    setTimeout(() => navigate(`/lesson/${topicId}/quiz`), 600);
   };
 
   const color = topic ? (subjectColor[topic.subject] || '#5B9BD5') : '#5B9BD5';
@@ -499,7 +541,12 @@ window.speechSynthesis.speak(utterance);
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
-        <p className="text-[14px] text-[#475467]">Loading lesson...</p>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-[#E4E7EC]"
+            style={{ borderTopColor: '#5B9BD5', animation: 'spin 1s linear infinite' }}/>
+          <p className="text-[14px] text-[#475467]">Loading lesson...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
       </div>
     );
   }
@@ -513,6 +560,7 @@ window.speechSynthesis.speak(utterance);
         .fade { animation: fadeUp 0.4s ease forwards; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
         .pulse { animation: pulse 1.5s ease infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       {/* TOP BAR */}
@@ -525,11 +573,16 @@ window.speechSynthesis.speak(utterance);
           <div className="flex items-center gap-1.5">
             {[1,2,3,4].map(l => (
               <div key={l} className="w-2 h-2 rounded-full transition-all"
-                style={{ background: l <= currentLevel ? color : '#E4E7EC', transform: l === currentLevel ? 'scale(1.4)' : 'scale(1)' }}/>
+                style={{
+                  background: l <= currentLevel ? color : '#E4E7EC',
+                  transform: l === currentLevel ? 'scale(1.4)' : 'scale(1)'
+                }}/>
             ))}
           </div>
           <button onClick={handleVoice}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all ${speaking ? 'text-white pulse' : 'bg-[#F8FAFC] border border-[#E4E7EC] text-[#475467] hover:border-[#5B9BD5]'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all ${
+              speaking ? 'text-white pulse' : 'bg-[#F8FAFC] border border-[#E4E7EC] text-[#475467] hover:border-[#5B9BD5]'
+            }`}
             style={speaking ? { background: color } : {}}>
             {speaking ? Icons.stop : Icons.voice}
             {speaking ? 'Stop' : 'Listen'}
@@ -540,6 +593,34 @@ window.speechSynthesis.speak(utterance);
       {/* CONTENT */}
       <div className="flex-1 max-w-[760px] mx-auto w-full px-5 md:px-8 py-8 flex flex-col gap-6">
 
+        {/* COMPLETED BANNER */}
+        {isCompleted && (
+          <div className="fade bg-[#F0FDF4] border-2 border-[#70AD47] rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#70AD47] flex items-center justify-center text-white flex-shrink-0">
+                {Icons.check}
+              </div>
+              <div>
+                <p className="text-[14px] font-bold text-[#336b07]">You completed this topic!</p>
+                <p className="text-[12px] text-[#475467]">You can review it or move to the next topic.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => navigate(`/flashcards/${topicId}`)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-white border border-[#70AD47] text-[#336b07] text-[13px] font-semibold rounded-xl hover:bg-[#F0FDF4] transition-colors">
+                {Icons.flashcard} Flashcards
+              </button>
+              {nextTopic && (
+                <button onClick={() => navigate(`/lesson/${nextTopic.id}`)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#70AD47] text-white text-[13px] font-bold rounded-xl hover:bg-[#336b07] transition-colors">
+                  Next Topic {Icons.arrow}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TOPIC + LEVEL INFO */}
         <div className="fade">
           <p className="text-[11px] font-bold uppercase tracking-widest mb-1" style={{ color }}>
             {topic?.subject} · {levelLabels[currentLevel].label}
@@ -548,13 +629,14 @@ window.speechSynthesis.speak(utterance);
           <p className="text-[13px] text-[#94A3B8] mt-1">{levelLabels[currentLevel].desc}</p>
         </div>
 
-        {/* Level tabs */}
+        {/* LEVEL TABS */}
         <div className="flex items-center gap-2 flex-wrap">
           {[1,2,3,4].map(l => (
-            <button key={l} onClick={() => l <= currentLevel && setCurrentLevel(l)}
+            <button key={l}
+              onClick={() => { if (l <= currentLevel) { setCurrentLevel(l); setSpeaking(false); window.speechSynthesis?.cancel(); } }}
               className={`px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all border ${
                 l === currentLevel ? 'text-white border-transparent'
-                : l < currentLevel ? 'bg-white text-[#475467] border-[#E4E7EC] cursor-pointer'
+                : l < currentLevel ? 'bg-white text-[#475467] border-[#E4E7EC] cursor-pointer hover:border-[#94A3B8]'
                 : 'bg-[#F8FAFC] text-[#94A3B8] border-[#F1F5F9] cursor-not-allowed opacity-50'
               }`}
               style={l === currentLevel ? { background: color } : {}}>
@@ -584,10 +666,7 @@ window.speechSynthesis.speak(utterance);
         {/* LEVEL 3 — Visual */}
         {currentLevel === 3 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
-            {hardcodedVisual
-              ? hardcodedVisual
-              : <GenericVisual text={lesson?.level_3}/>
-            }
+            {hardcodedVisual ? hardcodedVisual : <GenericVisual text={lesson?.level_3}/>}
           </div>
         )}
 
@@ -654,14 +733,16 @@ window.speechSynthesis.speak(utterance);
                 )}
               </>
             ) : (
-              <div className="text-center py-4">
+              <div className="text-center py-6">
+                <div className="w-8 h-8 rounded-full border-2 border-[#E4E7EC] mx-auto mb-3"
+                  style={{ borderTopColor: color, animation: 'spin 1s linear infinite' }}/>
                 <p className="text-[14px] text-[#475467]">Loading question...</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Encouragement */}
+        {/* ENCOURAGEMENT */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B] leading-[1.6]">

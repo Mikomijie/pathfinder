@@ -16,6 +16,11 @@ const Icons = {
       <line x1="8" y1="23" x2="16" y2="23"/>
     </svg>
   ),
+  stop: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+    </svg>
+  ),
   arrow: (
     <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M3 8h10M9 4l4 4-4 4"/>
@@ -37,6 +42,12 @@ const Icons = {
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
     </svg>
   ),
+  lock: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="3" y="11" width="18" height="11" rx="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  ),
 };
 
 const subjectColor = {
@@ -45,10 +56,11 @@ const subjectColor = {
   'Basic Science': '#F59E0B',
 };
 
+// Hardcoded flashcards per topic
 const TopicFlashcards = {
   'Introduction to Fractions': [
     { front: 'What is a fraction?', back: 'A fraction is a part of a whole, written as one number over another.' },
-    { front: 'What is the numerator?', back: 'The top number in a fraction — it tells you how many parts you have.' },
+    { front: 'What is the numerator?', back: 'The top number — it tells you how many parts you have.' },
     { front: 'What is the denominator?', back: 'The bottom number — it tells you how many equal parts the whole is divided into.' },
     { front: 'What does 3/4 mean?', back: 'You have 3 out of 4 equal parts.' },
     { front: 'What is one half as a fraction?', back: '1/2 — one part out of two equal parts.' },
@@ -56,15 +68,15 @@ const TopicFlashcards = {
   'Adding Fractions': [
     { front: 'How do you add fractions with the same denominator?', back: 'Add only the numerators. Keep the denominator the same. Example: 1/5 + 2/5 = 3/5' },
     { front: 'What is 2/6 + 3/6?', back: '5/6 — add the top numbers, keep the bottom number.' },
-    { front: 'What must you do before adding fractions with different denominators?', back: 'Make the denominators equal first.' },
-    { front: 'What is 1/2 + 1/4?', back: '3/4 — convert 1/2 to 2/4 first, then add.' },
+    { front: 'What must you do before adding fractions with different denominators?', back: 'Make the denominators equal first by finding a common denominator.' },
+    { front: 'What is 1/2 + 1/4?', back: '3/4 — convert 1/2 to 2/4 first, then add: 2/4 + 1/4 = 3/4.' },
     { front: 'What stays the same when adding fractions with equal denominators?', back: 'The denominator stays the same. Only the numerators are added.' },
   ],
   'Multiplying Fractions': [
     { front: 'How do you multiply two fractions?', back: 'Multiply the numerators together, then multiply the denominators together.' },
     { front: 'What is 1/2 × 2/3?', back: '2/6 which simplifies to 1/3.' },
     { front: 'What is 2/3 × 3/4?', back: '6/12 which simplifies to 1/2.' },
-    { front: 'What does it mean to simplify a fraction?', back: 'Divide both the numerator and denominator by the same number.' },
+    { front: 'What does it mean to simplify a fraction?', back: 'Divide both the numerator and denominator by the same number to make the fraction smaller.' },
     { front: 'What is 6/12 simplified?', back: '1/2 — divide both numbers by 6.' },
   ],
   'Parts of Speech': [
@@ -79,7 +91,7 @@ const TopicFlashcards = {
     { front: 'What does a comma do?', back: 'It creates a pause or separates items in a list.' },
     { front: 'When do you use a question mark?', back: 'At the end of a question. Example: Where are you going?' },
     { front: 'What does an exclamation mark show?', back: 'Strong feeling or surprise. Example: That is amazing!' },
-    { front: 'What is an apostrophe used for?', back: "To show ownership or shorten words. Example: Emeka's book, I'm happy." },
+    { front: "What is an apostrophe used for?", back: "To show ownership or shorten words. Example: Emeka's book, I'm happy." },
   ],
   'Writing a Good Paragraph': [
     { front: 'What are the three parts of a good paragraph?', back: 'Topic sentence, supporting sentences, and concluding sentence.' },
@@ -120,9 +132,13 @@ export default function Flashcards() {
   const [currentCard, setCurrentCard] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [known, setKnown] = useState([]);
+  const [studyMore, setStudyMore] = useState([]);
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [speaking, setSpeaking] = useState(false);
+  const [hasProgress, setHasProgress] = useState(false);
+
+  const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
 
   useEffect(() => {
     fetchTopic();
@@ -130,12 +146,49 @@ export default function Flashcards() {
   }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchTopic = async () => {
-    const { data: topicData } = await supabase
-      .from('topics').select('*').eq('id', topicId).single();
-    setTopic(topicData);
-    const hardcoded = TopicFlashcards[topicData?.title] || [];
-    setCards(hardcoded);
-    setLoading(false);
+    try {
+      const { data: topicData } = await supabase
+        .from('topics').select('*').eq('id', topicId).single();
+      setTopic(topicData);
+
+      // Check if student has started this lesson (gate access)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: progressData } = await supabase
+          .from('student_progress')
+          .select('*')
+          .eq('student_id', user.id)
+          .eq('topic_id', topicId)
+          .maybeSingle();
+        setHasProgress(!!(progressData?.level_reached > 0));
+      }
+
+      // Load flashcards — hardcoded first, then fallback to generic
+      const hardcoded = TopicFlashcards[topicData?.title];
+      if (hardcoded) {
+        setCards(hardcoded);
+      } else {
+        // Generic flashcards from lesson content
+        const { data: lessonData } = await supabase
+          .from('lessons').select('level_1').eq('topic_id', topicId).single();
+        if (lessonData?.level_1) {
+          // Create simple cards from lesson text
+          const sentences = lessonData.level_1
+            .split('. ')
+            .filter(s => s.length > 20)
+            .slice(0, 5);
+          const generatedCards = sentences.map((s, i) => ({
+            front: `Key point ${i + 1} from ${topicData?.title}`,
+            back: s.trim() + (s.endsWith('.') ? '' : '.'),
+          }));
+          setCards(generatedCards.length > 0 ? generatedCards : []);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleFlip = () => {
@@ -152,7 +205,7 @@ export default function Flashcards() {
       return;
     }
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.75;
+    utterance.rate = voiceSpeed;
     const voices = window.speechSynthesis.getVoices();
     const preferred = voices.find(v =>
       v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
@@ -163,26 +216,43 @@ export default function Flashcards() {
     setSpeaking(true);
   };
 
-  const nextCard = () => {
+  const nextCard = (isKnown) => {
     setFlipped(false);
     setSpeaking(false);
     window.speechSynthesis?.cancel();
+
+    if (isKnown) {
+      setKnown(prev => [...prev, currentCard]);
+    } else {
+      setStudyMore(prev => [...prev, currentCard]);
+    }
+
     setTimeout(() => {
       if (currentCard < cards.length - 1) {
         setCurrentCard(prev => prev + 1);
       } else {
         setFinished(true);
       }
-    }, 250);
+    }, 200);
   };
-
-  const handleKnow = () => { known.indexOf(currentCard) === -1 && setKnown(prev => [...prev, currentCard]); nextCard(); };
-  const handleStudyMore = () => nextCard();
 
   const handleRestart = () => {
     setCurrentCard(0);
     setFlipped(false);
     setKnown([]);
+    setStudyMore([]);
+    setFinished(false);
+    setSpeaking(false);
+  };
+
+  const handleRestartStudyMore = () => {
+    // Only review cards marked "study more" — spaced repetition
+    const studyMoreCards = studyMore.map(i => cards[i]);
+    setCards(studyMoreCards);
+    setCurrentCard(0);
+    setFlipped(false);
+    setKnown([]);
+    setStudyMore([]);
     setFinished(false);
     setSpeaking(false);
   };
@@ -201,12 +271,36 @@ export default function Flashcards() {
     );
   }
 
+  // GATE — must start lesson first
+  if (!hasProgress) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <div className="text-center max-w-[380px]">
+          <div className="w-16 h-16 rounded-2xl bg-[#F8FAFC] border border-[#E4E7EC] flex items-center justify-center mx-auto mb-5 text-[#94A3B8]">
+            {Icons.lock}
+          </div>
+          <h2 className="text-[20px] font-extrabold text-[#0F172A] mb-2">Start the lesson first</h2>
+          <p className="text-[14px] text-[#475467] leading-[1.7] mb-6">
+            Flashcards unlock after you begin the lesson. That way the cards make sense when you review them.
+          </p>
+          <button onClick={() => navigate(`/lesson/${topicId}`)}
+            className="flex items-center gap-2 px-6 py-3 text-white text-[14px] font-bold rounded-xl mx-auto transition-colors"
+            style={{ background: color }}>
+            Go to Lesson {Icons.arrow}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (cards.length === 0) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
         <div className="text-center">
           <h2 className="text-[22px] font-extrabold text-[#0F172A] mb-3">No flashcards yet</h2>
+          <p className="text-[13px] text-[#475467] mb-5">This topic does not have flashcards yet.</p>
           <button onClick={() => navigate('/dashboard/student')}
             className="px-8 py-3 bg-[#136299] text-white font-bold rounded-xl">
             Back to Dashboard
@@ -216,6 +310,7 @@ export default function Flashcards() {
     );
   }
 
+  // FINISHED SCREEN
   if (finished) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
@@ -223,12 +318,15 @@ export default function Flashcards() {
           @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
           * { font-family: 'Plus Jakarta Sans', sans-serif; }
           @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes pop { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
           .f1 { animation: fadeUp 0.5s ease forwards; }
           .f2 { animation: fadeUp 0.5s 0.15s ease both; }
           .f3 { animation: fadeUp 0.5s 0.3s ease both; }
+          .pop { animation: pop 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
         `}</style>
         <div className="text-center max-w-[440px] w-full">
-          <div className="f1 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border-4"
+
+          <div className="pop w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border-4"
             style={{ borderColor: color, background: `${color}15` }}>
             <div>
               <p className="text-[28px] font-extrabold" style={{ color }}>{knownCount}/{cards.length}</p>
@@ -236,7 +334,7 @@ export default function Flashcards() {
             </div>
           </div>
 
-          <div className="f1 flex items-center justify-center gap-1.5 mb-5">
+          <div className="f1 flex items-center justify-center gap-1.5 mb-4">
             {[1,2,3].map(i => (
               <span key={i} style={{ color: i <= Math.ceil(knownCount/cards.length*3) ? '#F59E0B' : '#E4E7EC' }}>
                 {Icons.star}
@@ -245,17 +343,25 @@ export default function Flashcards() {
           </div>
 
           <h1 className="f1 text-[26px] font-extrabold text-[#0F172A] mb-2">
-            {knownCount === cards.length ? 'You know them all!' : knownCount >= cards.length / 2 ? 'Good session!' : 'Keep practising!'}
+            {knownCount === cards.length ? 'You know them all!'
+              : knownCount >= Math.ceil(cards.length / 2) ? 'Good session!'
+              : 'Keep practising!'}
           </h1>
           <p className="f2 text-[14px] text-[#475467] leading-[1.7] mb-8">
             You marked <span className="font-bold" style={{ color }}>{knownCount} out of {cards.length}</span> cards as known.
-            {knownCount < cards.length && ' Review the others again — repetition is how we learn.'}
+            {studyMore.length > 0 && ` You have ${studyMore.length} card${studyMore.length !== 1 ? 's' : ''} to review again.`}
           </p>
 
           <div className="f3 flex flex-col sm:flex-row gap-3 justify-center">
+            {studyMore.length > 0 && (
+              <button onClick={handleRestartStudyMore}
+                className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border-2 border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-all">
+                {Icons.refresh} Review {studyMore.length} again
+              </button>
+            )}
             <button onClick={handleRestart}
               className="flex items-center justify-center gap-2 px-6 py-3.5 bg-white border-2 border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-all">
-              {Icons.refresh} Review Again
+              {Icons.refresh} Review All
             </button>
             <button onClick={() => navigate('/dashboard/student')}
               className="flex items-center justify-center gap-2 px-6 py-3.5 text-white text-[14px] font-bold rounded-xl transition-colors"
@@ -268,6 +374,7 @@ export default function Flashcards() {
     );
   }
 
+  // FLASHCARD SCREEN
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col">
       <style>{`
@@ -307,7 +414,9 @@ export default function Flashcards() {
               {cards.map((_, i) => (
                 <div key={i} className="w-1.5 h-1.5 rounded-full transition-all"
                   style={{
-                    background: known.includes(i) ? '#70AD47' : i === currentCard ? color : '#E4E7EC',
+                    background: known.includes(i) ? '#70AD47'
+                      : studyMore.includes(i) ? '#BA1A1A'
+                      : i === currentCard ? color : '#E4E7EC',
                     transform: i === currentCard ? 'scale(1.4)' : 'scale(1)'
                   }}/>
               ))}
@@ -318,7 +427,7 @@ export default function Flashcards() {
 
       <div className="flex-1 max-w-[560px] mx-auto w-full px-5 md:px-8 py-8 flex flex-col gap-5">
 
-        {/* Header */}
+        {/* HEADER */}
         <div className="fade">
           <p className="text-[11px] font-bold uppercase tracking-widest mb-1" style={{ color }}>
             {topic?.subject} · Flashcards
@@ -331,10 +440,10 @@ export default function Flashcards() {
 
         {/* CARD */}
         <div className="card-wrap" style={{ height: '300px' }}>
-          <div className={`card-inner ${flipped ? 'flipped' : ''}`} onClick={handleFlip}
-            style={{ cursor: 'pointer' }}>
+          <div className={`card-inner ${flipped ? 'flipped' : ''}`}
+            onClick={handleFlip} style={{ cursor: 'pointer' }}>
 
-            {/* FRONT — white, colored border */}
+            {/* FRONT */}
             <div className="card-front bg-white border-2 shadow-lg shadow-black/5"
               style={{ borderColor: color }}>
               <p className="text-[10px] font-bold uppercase tracking-widest mb-4 opacity-60" style={{ color }}>
@@ -343,17 +452,16 @@ export default function Flashcards() {
               <p className="text-[17px] md:text-[19px] font-bold text-[#0F172A] leading-[1.6]">
                 {card?.front}
               </p>
-              <button
-                onClick={(e) => handleVoice(e, card?.front)}
+              <button onClick={(e) => handleVoice(e, card?.front)}
                 className="mt-6 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E4E7EC] text-[12px] font-medium transition-colors"
-                style={{ color: speaking ? color : '#94A3B8' }}
-              >
-                {Icons.voice} {speaking ? 'Stop' : 'Listen'}
+                style={{ color: speaking ? color : '#94A3B8' }}>
+                {speaking ? Icons.stop : Icons.voice}
+                {speaking ? 'Stop' : 'Listen'}
               </button>
               <p className="text-[11px] text-[#94A3B8] mt-4 absolute bottom-5">tap to flip</p>
             </div>
 
-            {/* BACK — dark navy, clean */}
+            {/* BACK — dark navy */}
             <div className="card-back bg-[#0F172A] border-2 border-[#1E293B] shadow-lg shadow-black/20">
               <p className="text-[10px] font-bold uppercase tracking-widest mb-4 opacity-40 text-white">
                 Answer
@@ -361,47 +469,41 @@ export default function Flashcards() {
               <p className="text-[17px] md:text-[19px] font-bold text-white leading-[1.6]">
                 {card?.back}
               </p>
-              <button
-                onClick={(e) => handleVoice(e, card?.back)}
-                className="mt-6 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/20 text-[12px] font-medium text-white/60 hover:text-white hover:border-white/40 transition-colors"
-              >
-                {Icons.voice} Listen
+              <button onClick={(e) => handleVoice(e, card?.back)}
+                className="mt-6 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/20 text-[12px] font-medium text-white/60 hover:text-white hover:border-white/40 transition-colors">
+                {speaking ? Icons.stop : Icons.voice} Listen
               </button>
               <p className="text-[11px] text-white/20 mt-4 absolute bottom-5">tap to flip back</p>
             </div>
           </div>
         </div>
 
-        {/* ACTION BUTTONS */}
+        {/* ACTION BUTTONS — show after flipping */}
         {flipped ? (
           <div className="flex gap-3 fade">
-            <button
-              onClick={handleStudyMore}
-              className="flex-1 py-4 bg-white border-2 border-[#E4E7EC] hover:border-[#BA1A1A] hover:bg-[#FFF1F1] text-[#475467] hover:text-[#BA1A1A] text-[15px] font-bold rounded-xl transition-all"
-            >
+            <button onClick={() => nextCard(false)}
+              className="flex-1 py-4 bg-white border-2 border-[#E4E7EC] hover:border-[#BA1A1A] hover:bg-[#FFF1F1] text-[#475467] hover:text-[#BA1A1A] text-[15px] font-bold rounded-xl transition-all active:scale-[0.98]">
               Study more
             </button>
-            <button
-              onClick={handleKnow}
-              className="flex-1 py-4 text-white text-[15px] font-bold rounded-xl transition-all shadow-md"
-              style={{ background: '#70AD47' }}
-            >
+            <button onClick={() => nextCard(true)}
+              className="flex-1 py-4 text-white text-[15px] font-bold rounded-xl transition-all shadow-md active:scale-[0.98]"
+              style={{ background: '#70AD47' }}>
               I know this
             </button>
           </div>
         ) : (
-          <div className="flex gap-3">
-            <div className="flex-1 py-4 bg-[#F8FAFC] border-2 border-dashed border-[#E4E7EC] rounded-xl flex items-center justify-center">
-              <p className="text-[13px] text-[#94A3B8] font-medium">Tap card to reveal answer</p>
-            </div>
+          <div className="py-4 bg-[#F8FAFC] border-2 border-dashed border-[#E4E7EC] rounded-xl flex items-center justify-center">
+            <p className="text-[13px] text-[#94A3B8] font-medium">Tap card to reveal answer</p>
           </div>
         )}
 
-        {/* Tip */}
+        {/* TIP */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B] leading-[1.6]">
-            Mark cards you know. The ones you don't will come back with practice.
+            {studyMore.length > 0
+              ? `${studyMore.length} card${studyMore.length !== 1 ? 's' : ''} marked for review — you can go over them again at the end.`
+              : 'Mark cards you know. The ones you study more will come back for review.'}
           </p>
         </div>
 

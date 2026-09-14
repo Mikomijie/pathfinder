@@ -10,6 +10,13 @@ const Icons = {
       <line x1="12" y1="3" x2="12" y2="15"/>
     </svg>
   ),
+  uploadSm: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+  ),
   file: (
     <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -72,7 +79,6 @@ export default function PDFUpload({ profile, onNavigate }) {
   const [pdfBase64, setPdfBase64] = useState(null);
   const [pasteText, setPasteText] = useState('');
   const [topicTitle, setTopicTitle] = useState('');
-  const [fileStatus, setFileStatus] = useState('');
   const [processing, setProcessing] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [error, setError] = useState('');
@@ -81,23 +87,27 @@ export default function PDFUpload({ profile, onNavigate }) {
   const readFile = (file) => {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setFileStatus('Only PDF files are supported.');
+      setError('Only PDF files are supported. Please use "Paste Notes" for other formats.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File too large. Maximum size is 10MB. Try pasting the text directly instead.');
       return;
     }
     setFileName(file.name);
-    setFileStatus('Reading PDF...');
+    setError('');
     setPdfBase64(null);
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target?.result?.split(',')[1];
       if (base64) {
         setPdfBase64(base64);
-        setFileStatus(`Ready: ${file.name}`);
       } else {
-        setFileStatus('Could not read PDF. Please try paste mode instead.');
+        setError('Could not read PDF. Please try Paste Notes instead.');
       }
     };
-    reader.onerror = () => setFileStatus('Failed to read file.');
+    reader.onerror = () => setError('Failed to read file. Please try again.');
     reader.readAsDataURL(file);
   };
 
@@ -129,7 +139,7 @@ export default function PDFUpload({ profile, onNavigate }) {
 
     const stepInterval = setInterval(() => {
       setLoadingStep(prev => prev < loadingSteps.length - 1 ? prev + 1 : prev);
-    }, 5000);
+    }, 6000);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -150,22 +160,34 @@ export default function PDFUpload({ profile, onNavigate }) {
       if (data?.error) throw new Error(data.error);
       setDone(data);
     } catch (err) {
-  clearInterval(stepInterval);
-  const msg = err.message || '';
-  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
-    setError('Connection lost. Please check your internet and try again.');
-  } else if (msg.includes('timeout') || msg.includes('timed out')) {
-    setError('This is taking longer than usual. Please try again with a shorter piece of text.');
-  } else if (msg.includes('extract') || msg.includes('Could not read')) {
-    setError('Could not read this PDF. Please switch to "Paste Notes" and paste your content directly.');
-  } else if (msg.includes('Empty response') || msg.includes('OpenRouter')) {
-    setError('Our AI is busy right now. Please wait a moment and try again.');
-  } else {
-    setError('Something went wrong. Please try again or switch to Paste Notes mode.');
-  }
-} finally {
-  setProcessing(false);
-}
+      clearInterval(stepInterval);
+      const msg = err.message || '';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
+        setError('Connection lost. Please check your internet and try again.');
+      } else if (msg.includes('timeout') || msg.includes('timed out')) {
+        setError('This is taking longer than usual. Please try again with a shorter piece of text.');
+      } else if (msg.includes('extract') || msg.includes('Could not read') || msg.includes('Could not extract')) {
+        setError('Could not read this PDF. Please switch to "Paste Notes" and paste your content directly.');
+      } else if (msg.includes('Empty response') || msg.includes('OpenRouter') || msg.includes('AI')) {
+        setError('Our AI is busy right now. Please wait a moment and try again.');
+      } else if (msg.includes('HTTP2') || msg.includes('protocol')) {
+        setError('Connection issue with our server. Please try again in a moment.');
+      } else {
+        setError('Something went wrong. Please try Paste Notes mode instead.');
+      }
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleReset = () => {
+    setDone(null);
+    setPdfBase64(null);
+    setFileName('');
+    setTopicTitle('');
+    setError('');
+    setPasteText('');
+    setMode('pdf');
   };
 
   // SUCCESS SCREEN
@@ -174,23 +196,28 @@ export default function PDFUpload({ profile, onNavigate }) {
       <div className="flex flex-col gap-6 max-w-[600px]">
         <style>{`
           @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes pop { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
           .f1 { animation: fadeUp 0.4s ease forwards; }
           .f2 { animation: fadeUp 0.4s 0.1s ease both; }
           .f3 { animation: fadeUp 0.4s 0.2s ease both; }
+          .pop { animation: pop 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
         `}</style>
+
         <div className="f1 flex flex-col items-center text-center gap-3 py-4">
-          <div className="w-16 h-16 rounded-full bg-[#F0FDF4] border-2 border-[#70AD47] flex items-center justify-center text-[#70AD47]">
+          <div className="pop w-16 h-16 rounded-full bg-[#F0FDF4] border-2 border-[#70AD47] flex items-center justify-center text-[#70AD47]">
             {Icons.check}
           </div>
           <h2 className="text-[22px] font-extrabold text-[#0F172A]">Your lessons are ready!</h2>
           <p className="text-[14px] text-[#475467] leading-[1.7]">
-            We created <span className="font-bold text-[#136299]">{done.totalParts} micro-lessons</span> from your notes. Each one has 4 explanation levels and voice support.
+            We created <span className="font-bold text-[#136299]">{done.totalParts} micro-lesson{done.totalParts !== 1 ? 's' : ''}</span> from your notes.
+            Each one has 4 explanation levels and voice support.
           </p>
         </div>
+
         <div className="f2 flex flex-col gap-3">
           {done.lessons?.map((lesson, i) => (
             <button key={i} onClick={() => navigate(`/lesson/${lesson.topicId}`)}
-              className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left">
+              className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left active:scale-[0.99]">
               <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#136299] font-bold text-[13px] flex-shrink-0">
                 {i + 1}
               </div>
@@ -202,9 +229,9 @@ export default function PDFUpload({ profile, onNavigate }) {
             </button>
           ))}
         </div>
+
         <div className="f3 flex gap-3">
-          <button
-            onClick={() => { setDone(null); setPdfBase64(null); setFileName(''); setTopicTitle(''); setFileStatus(''); setPasteText(''); }}
+          <button onClick={handleReset}
             className="flex-1 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
             Upload Another
           </button>
@@ -234,8 +261,11 @@ export default function PDFUpload({ profile, onNavigate }) {
           <h3 className="text-[20px] font-extrabold text-[#0F172A] mb-2">Building your lessons</h3>
           <div className="flex items-center justify-center gap-1.5 mb-3">
             {loadingSteps.map((_, i) => (
-              <div key={i} className="h-1.5 rounded-full transition-all duration-300"
-                style={{ width: i === loadingStep ? '24px' : '8px', background: i === loadingStep ? '#5B9BD5' : '#E4E7EC' }}/>
+              <div key={i} className="h-1.5 rounded-full transition-all duration-500"
+                style={{
+                  width: i === loadingStep ? '24px' : '8px',
+                  background: i === loadingStep ? '#5B9BD5' : '#E4E7EC'
+                }}/>
             ))}
           </div>
           <p className="text-[14px] text-[#475467]">{loadingSteps[loadingStep].text}</p>
@@ -257,46 +287,46 @@ export default function PDFUpload({ profile, onNavigate }) {
         @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         .f1 { animation: fadeUp 0.4s ease forwards; }
         .f2 { animation: fadeUp 0.4s 0.08s ease both; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       <div className="f1">
         <h1 className="text-[24px] font-extrabold text-[#0F172A]">Upload Lecture Notes</h1>
         <p className="text-[14px] text-[#475467] mt-1">
-          Upload your PDF or paste your notes — we'll build adaptive micro-lessons instantly.
+          Upload your PDF or paste your notes — we build adaptive micro-lessons instantly.
         </p>
       </div>
 
+      {/* ERROR */}
       {error && (
-  <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl flex gap-3">
-    <div className="flex-1">
-      <p className="text-[13px] font-bold text-[#BA1A1A] mb-1">Something went wrong</p>
-      <p className="text-[13px] text-[#BA1A1A]">{error}</p>
-      {error.includes('PDF') && (
-        <button
-          onClick={() => { setMode('paste'); setError(''); }}
-          className="mt-2 text-[12px] font-bold text-[#136299] hover:underline"
-        >
-          Switch to Paste Notes instead
-        </button>
+        <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl flex gap-3">
+          <div className="flex-1">
+            <p className="text-[13px] font-bold text-[#BA1A1A] mb-1">Something went wrong</p>
+            <p className="text-[13px] text-[#BA1A1A]">{error}</p>
+            {(error.includes('PDF') || error.includes('read')) && (
+              <button onClick={() => { setMode('paste'); setError(''); }}
+                className="mt-2 text-[12px] font-bold text-[#136299] hover:underline">
+                Switch to Paste Notes instead
+              </button>
+            )}
+          </div>
+          <button onClick={() => setError('')} className="flex-shrink-0 text-[#BA1A1A]">
+            {Icons.close}
+          </button>
+        </div>
       )}
-    </div>
-    <button onClick={() => setError('')} className="flex-shrink-0 text-[#BA1A1A]">
-      {Icons.close}
-    </button>
-  </div>
-)}
 
       <form onSubmit={handleSubmit} className="f2 flex flex-col gap-5">
 
         {/* MODE SWITCHER */}
         <div className="flex p-1 bg-[#F1F5F9] rounded-xl gap-1">
-          <button type="button" onClick={() => setMode('pdf')}
+          <button type="button" onClick={() => { setMode('pdf'); setError(''); }}
             className={`flex-1 py-2.5 text-[13px] font-semibold rounded-lg transition-all ${
               mode === 'pdf' ? 'bg-white text-[#0F172A] shadow-sm' : 'text-[#475467] hover:text-[#0F172A]'
             }`}>
             Upload PDF
           </button>
-          <button type="button" onClick={() => setMode('paste')}
+          <button type="button" onClick={() => { setMode('paste'); setError(''); }}
             className={`flex-1 py-2.5 text-[13px] font-semibold rounded-lg transition-all ${
               mode === 'paste' ? 'bg-white text-[#0F172A] shadow-sm' : 'text-[#475467] hover:text-[#0F172A]'
             }`}>
@@ -316,8 +346,15 @@ export default function PDFUpload({ profile, onNavigate }) {
               : 'border-[#E4E7EC] bg-[#F8FAFC] hover:border-[#5B9BD5] hover:bg-[#EFF6FF]'
             }`}
           >
-            <input ref={fileInputRef} type="file" accept=".pdf" onChange={handleFileChange} className="hidden"/>
-            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 ${
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={handleFileChange}
+              className="hidden"
+              capture={false}
+            />
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${
               pdfBase64 ? 'bg-[#70AD47] text-white' : 'bg-white border border-[#E4E7EC] text-[#94A3B8]'
             }`}>
               {pdfBase64 ? Icons.check : Icons.upload}
@@ -327,7 +364,7 @@ export default function PDFUpload({ profile, onNavigate }) {
                 <p className="text-[15px] font-bold text-[#336b07]">{fileName}</p>
                 <p className="text-[13px] text-[#70AD47] mt-1">PDF loaded — ready to process</p>
                 <button type="button"
-                  onClick={(e) => { e.stopPropagation(); setPdfBase64(null); setFileName(''); setFileStatus(''); }}
+                  onClick={(e) => { e.stopPropagation(); setPdfBase64(null); setFileName(''); }}
                   className="mt-3 text-[12px] text-[#94A3B8] hover:text-[#BA1A1A] transition-colors">
                   Remove file
                 </button>
@@ -335,7 +372,7 @@ export default function PDFUpload({ profile, onNavigate }) {
             ) : (
               <>
                 <p className="text-[15px] font-bold text-[#0F172A]">Drag and drop your PDF</p>
-                <p className="text-[13px] text-[#94A3B8] mt-1">or click to browse files</p>
+                <p className="text-[13px] text-[#94A3B8] mt-1">or tap to browse files</p>
                 <p className="text-[11px] text-[#94A3B8] mt-3">PDF files only · Max 10MB</p>
               </>
             )}
@@ -345,7 +382,7 @@ export default function PDFUpload({ profile, onNavigate }) {
         {/* PASTE TEXT */}
         {mode === 'paste' && (
           <div className="flex flex-col gap-2">
-            <div className="border-2 border-[#E4E7EC] rounded-2xl p-4 bg-white focus-within:border-[#5B9BD5] transition-colors">
+            <div className="border-2 border-[#E4E7EC] focus-within:border-[#5B9BD5] rounded-2xl p-4 bg-white transition-colors">
               <textarea
                 rows={8}
                 placeholder="Paste your lecture notes, textbook content or study material here..."
@@ -354,14 +391,16 @@ export default function PDFUpload({ profile, onNavigate }) {
                 className="w-full text-[14px] text-[#1E293B] placeholder-[#94A3B8] outline-none resize-none leading-[1.7] bg-transparent"
               />
             </div>
-            <p className="text-[12px] text-[#94A3B8]">
-              Paste any amount of text — we'll break it into micro-lessons automatically.
-            </p>
-            {pasteText.length > 0 && (
-              <p className="text-[12px] text-[#70AD47] font-medium">
-                {pasteText.length} characters · approximately {Math.ceil(pasteText.length / 1500)} micro-lesson{Math.ceil(pasteText.length / 1500) !== 1 ? 's' : ''} will be created
+            <div className="flex items-center justify-between">
+              <p className="text-[12px] text-[#94A3B8]">
+                Paste any amount of text — we break it into micro-lessons automatically.
               </p>
-            )}
+              {pasteText.length > 0 && (
+                <p className="text-[12px] text-[#70AD47] font-semibold flex-shrink-0 ml-3">
+                  ~{Math.ceil(pasteText.length / 1500)} lesson{Math.ceil(pasteText.length / 1500) !== 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -377,6 +416,9 @@ export default function PDFUpload({ profile, onNavigate }) {
             onChange={e => setTopicTitle(e.target.value)}
             className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
           />
+          <p className="text-[11px] text-[#94A3B8] mt-1.5">
+            If left blank we will use the filename or "My Notes" as the title.
+          </p>
         </div>
 
         {/* WHAT HAPPENS */}
@@ -386,7 +428,7 @@ export default function PDFUpload({ profile, onNavigate }) {
             {[
               'Your content is broken into chunks',
               'Each chunk becomes a micro-lesson with 4 explanation levels',
-              'Voice support added — listen to any lesson',
+              'Voice support added automatically',
               'Start learning immediately after processing',
             ].map((step, i) => (
               <div key={i} className="flex items-center gap-2.5">
@@ -399,10 +441,11 @@ export default function PDFUpload({ profile, onNavigate }) {
           </div>
         </div>
 
+        {/* SUBMIT */}
         <button
           type="submit"
           disabled={mode === 'pdf' ? !pdfBase64 : !pasteText.trim()}
-          className="w-full py-4 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+          className="w-full py-4 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors flex items-center justify-center gap-2 active:scale-[0.99]"
         >
           {Icons.spark} Process My Notes
         </button>
