@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 
@@ -116,10 +116,10 @@ export default function TeacherDashboard() {
   const [selectedClass, setSelectedClass] = useState(null);
   const [uploadForm, setUploadForm] = useState({ title: '', description: '', class_id: '', file: null });
   const [uploading, setUploading] = useState(false);
-  const [newClassForm, setNewClassForm] = useState({ name: '', subject: '', level: '', grade_level: '' });
+  const [newClassForm, setNewClassForm] = useState({ name: '', subject: '', level: '' });
   const [creatingClass, setCreatingClass] = useState(false);
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { navigate('/login'); return; }
 
@@ -128,11 +128,12 @@ export default function TeacherDashboard() {
     setProfile(profileData);
 
     const { data: classesData } = await supabase
-      .from('classes').select('*').eq('teacher_id', user.id).order('created_at', { ascending: false });
+      .from('classes').select('*').eq('teacher_id', user.id)
+      .order('created_at', { ascending: false });
     setClasses(classesData || []);
 
     if (classesData?.length > 0) {
-      setSelectedClass(classesData[0]);
+      setSelectedClass(prev => prev || classesData[0]);
       const classIds = classesData.map(c => c.id);
 
       const { data: membersData } = await supabase
@@ -148,7 +149,7 @@ export default function TeacherDashboard() {
     }
 
     setLoading(false);
-  };
+  }, [navigate]);
 
   useEffect(() => {
     fetchAll();
@@ -169,7 +170,6 @@ export default function TeacherDashboard() {
     e.preventDefault();
     if (!uploadForm.title || !uploadForm.class_id) return;
     setUploading(true);
-
     try {
       const { error } = await supabase.from('class_materials').insert({
         class_id: uploadForm.class_id,
@@ -202,7 +202,7 @@ export default function TeacherDashboard() {
       });
       if (error) throw error;
       setShowNewClass(false);
-      setNewClassForm({ name: '', subject: '', level: '', grade_level: '' });
+      setNewClassForm({ name: '', subject: '', level: '' });
       fetchAll();
     } catch (err) {
       console.error(err);
@@ -216,7 +216,6 @@ export default function TeacherDashboard() {
   const classStudents = selectedClass
     ? students.filter(s => s.class_id === selectedClass.id)
     : [];
-
 
   const navItems = [
     { key: 'home', label: 'Home', icon: Icons.home },
@@ -243,19 +242,17 @@ export default function TeacherDashboard() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         * { font-family: 'Plus Jakarta Sans', sans-serif; }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         .f1 { animation: fadeUp 0.4s ease forwards; }
         .f2 { animation: fadeUp 0.4s 0.08s ease both; }
         .f3 { animation: fadeUp 0.4s 0.16s ease both; }
         .f4 { animation: fadeUp 0.4s 0.24s ease both; }
       `}</style>
 
-      {/* Sidebar overlay mobile */}
+      {/* SIDEBAR OVERLAY */}
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden" onClick={() => setSidebarOpen(false)}/>
+        <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}/>
       )}
 
       {/* SIDEBAR */}
@@ -264,13 +261,12 @@ export default function TeacherDashboard() {
         flex flex-col z-40 transition-transform duration-300
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
-        <div className="h-[60px] flex items-center gap-2 px-5 border-b border-[#E4E7EC]">
+        <div className="h-[60px] flex items-center gap-2 px-5 border-b border-[#E4E7EC] flex-shrink-0">
           {Icons.logo}
           <span className="text-[16px] font-bold text-[#136299]">PATHFINDER</span>
         </div>
 
-        {/* Teacher badge */}
-        <div className="px-4 py-3 border-b border-[#E4E7EC]">
+        <div className="px-4 py-3 border-b border-[#E4E7EC] flex-shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 bg-[#F0FDF4] rounded-xl">
             <div className="w-6 h-6 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[11px] font-bold">
               T
@@ -279,17 +275,15 @@ export default function TeacherDashboard() {
           </div>
         </div>
 
-        <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
+        <nav className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto">
           {navItems.map(item => (
-            <button
-              key={item.key}
+            <button key={item.key}
               onClick={() => { setActiveNav(item.key); setSidebarOpen(false); }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium transition-all w-full text-left ${
                 activeNav === item.key
                   ? 'bg-[#F0FDF4] text-[#336b07] font-semibold'
                   : 'text-[#475467] hover:bg-[#F8FAFC] hover:text-[#1E293B]'
-              }`}
-            >
+              }`}>
               <span className={activeNav === item.key ? 'text-[#336b07]' : 'text-[#94A3B8]'}>
                 {item.icon}
               </span>
@@ -298,37 +292,37 @@ export default function TeacherDashboard() {
           ))}
         </nav>
 
-        <div className="px-3 py-4 border-t border-[#E4E7EC]">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#BA1A1A] hover:bg-[#FFF1F1] transition-all w-full text-left"
-          >
+        <div className="px-3 py-4 border-t border-[#E4E7EC] flex-shrink-0">
+          <button onClick={handleLogout}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#BA1A1A] hover:bg-[#FFF1F1] transition-all w-full text-left">
             {Icons.logout} Log Out
           </button>
         </div>
       </aside>
 
       {/* MAIN */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        <header className="h-[60px] bg-white border-b border-[#E4E7EC] flex items-center justify-between px-5 md:px-8 sticky top-0 z-20">
+      <div className="flex-1 flex flex-col min-h-screen min-w-0">
+        <header className="h-[60px] bg-white border-b border-[#E4E7EC] flex items-center justify-between px-4 md:px-8 sticky top-0 z-20 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <button className="md:hidden text-[#475467]" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            <button className="md:hidden text-[#475467] p-1" onClick={() => setSidebarOpen(!sidebarOpen)}>
               {Icons.menu}
             </button>
-            <p className="text-[13px] text-[#94A3B8]">{profile?.school_name || 'Pathfinder'}</p>
+            <p className="text-[13px] text-[#94A3B8] truncate max-w-[160px] md:max-w-none">
+              {profile?.school_name || 'Pathfinder'}
+            </p>
           </div>
-          <div className="w-8 h-8 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[13px] font-bold">
+          <div className="w-8 h-8 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[13px] font-bold flex-shrink-0">
             {firstName[0]?.toUpperCase()}
           </div>
         </header>
 
-        <main className="flex-1 px-5 md:px-8 py-6 md:py-8 w-full max-w-[1100px] mx-auto">
+        <main className="flex-1 px-4 md:px-8 py-6 md:py-8 w-full max-w-[1100px] mx-auto">
 
           {/* HOME */}
           {activeNav === 'home' && (
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               <div className="f1">
-                <h1 className="text-[26px] md:text-[30px] font-extrabold text-[#0F172A]">
+                <h1 className="text-[24px] md:text-[30px] font-extrabold text-[#0F172A]">
                   Welcome, {firstName}.
                 </h1>
                 <p className="text-[14px] text-[#475467] mt-1">
@@ -338,41 +332,52 @@ export default function TeacherDashboard() {
 
               {/* Class Code Card */}
               {primaryClass && (
-                <div className="f2 bg-[#1A3A2A] rounded-2xl p-6 md:p-7">
-                  <span className="text-[10px] font-bold text-[#70AD47] uppercase tracking-widest">Your Primary Class Code</span>
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
+                <div className="f2 bg-[#1A3A2A] rounded-2xl p-5 md:p-7">
+                  <span className="text-[10px] font-bold text-[#70AD47] uppercase tracking-widest">
+                    Your Primary Class Code
+                  </span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-3">
                     <div>
-                      <h2 className="text-[32px] md:text-[40px] font-extrabold text-white tracking-widest">
+                      <h2 className="text-[28px] md:text-[40px] font-extrabold text-white tracking-widest">
                         {primaryClass.code}
                       </h2>
                       <p className="text-[13px] text-white/50 mt-1">
-  {primaryClass.name} · {students.filter(s => s.class_id === primaryClass.id).length} students joined
-</p>
+                        {primaryClass.name} · {students.filter(s => s.class_id === primaryClass.id).length} students joined
+                      </p>
                     </div>
-                    <button
-                      onClick={() => copyCode(primaryClass.code)}
-                      className="flex items-center gap-2 px-6 py-3 bg-[#70AD47] hover:bg-[#336b07] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0"
-                    >
+                    <button onClick={() => copyCode(primaryClass.code)}
+                      className="flex items-center gap-2 px-5 py-3 bg-[#70AD47] hover:bg-[#336b07] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0 active:scale-[0.98]">
                       {copied ? Icons.check : Icons.copy}
                       {copied ? 'Copied!' : 'Copy Code'}
                     </button>
                   </div>
                   <p className="text-[12px] text-white/60 mt-4">
-  Share this code with your students. They enter it during signup to join your class.
-</p>
+                    Share this code with your students. They enter it during signup to join your class.
+                  </p>
+                </div>
+              )}
+
+              {!primaryClass && (
+                <div className="f2 bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
+                  <p className="text-[15px] font-bold text-[#0F172A] mb-2">No classes yet</p>
+                  <p className="text-[13px] text-[#475467] mb-4">Create your first class to get a code to share with students.</p>
+                  <button onClick={() => setActiveNav('classes')}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-[#336b07] text-white text-[13px] font-bold rounded-xl mx-auto transition-colors">
+                    {Icons.plus} Create First Class
+                  </button>
                 </div>
               )}
 
               {/* Quick Stats */}
-              <div className="f3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="f3 grid grid-cols-3 gap-3">
                 {[
                   { label: 'Total Students', value: students.length.toString(), color: '#136299', bg: '#EFF6FF' },
-                  { label: 'Materials Uploaded', value: materials.length.toString(), color: '#70AD47', bg: '#F0FDF4' },
-                  { label: 'Total Classes', value: classes.length.toString(), color: '#F59E0B', bg: '#FFFBEB' },
+                  { label: 'Materials', value: materials.length.toString(), color: '#70AD47', bg: '#F0FDF4' },
+                  { label: 'Classes', value: classes.length.toString(), color: '#F59E0B', bg: '#FFFBEB' },
                 ].map((s, i) => (
-                  <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
-                    <p className="text-[28px] font-extrabold" style={{ color: s.color }}>{s.value}</p>
-                    <p className="text-[13px] font-semibold text-[#0F172A] mt-1">{s.label}</p>
+                  <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-4">
+                    <p className="text-[24px] md:text-[28px] font-extrabold" style={{ color: s.color }}>{s.value}</p>
+                    <p className="text-[11px] md:text-[13px] font-semibold text-[#0F172A] mt-1">{s.label}</p>
                   </div>
                 ))}
               </div>
@@ -381,39 +386,35 @@ export default function TeacherDashboard() {
               <div className="f4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-[15px] font-bold text-[#0F172A]">Recent Materials</h2>
-                  <button
-                    onClick={() => setActiveNav('upload')}
-                    className="flex items-center gap-1.5 text-[13px] text-[#336b07] font-semibold hover:underline"
-                  >
+                  <button onClick={() => setActiveNav('upload')}
+                    className="flex items-center gap-1.5 text-[13px] text-[#336b07] font-semibold hover:underline">
                     {Icons.plus} Add new
                   </button>
                 </div>
                 {materials.length === 0 ? (
-                  <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
+                  <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-6 text-center">
                     <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">
                       {Icons.upload}
                     </div>
                     <p className="text-[14px] font-semibold text-[#0F172A]">No materials uploaded yet</p>
                     <p className="text-[13px] text-[#94A3B8] mt-1">Upload your first material for students to access.</p>
-                    <button
-                      onClick={() => setActiveNav('upload')}
-                      className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors mx-auto"
-                    >
+                    <button onClick={() => setActiveNav('upload')}
+                      className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors mx-auto">
                       Upload Material {Icons.arrow}
                     </button>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
                     {materials.slice(0, 3).map((m, i) => (
-                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-4">
+                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07] flex-shrink-0">
                           {Icons.file}
                         </div>
-                        <div className="flex-1">
-                          <p className="text-[14px] font-semibold text-[#0F172A]">{m.title}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{m.title}</p>
                           <p className="text-[12px] text-[#94A3B8]">{m.description || 'No description'}</p>
                         </div>
-                        <span className="text-[11px] text-[#94A3B8]">
+                        <span className="text-[11px] text-[#94A3B8] flex-shrink-0">
                           {new Date(m.created_at).toLocaleDateString()}
                         </span>
                       </div>
@@ -426,73 +427,52 @@ export default function TeacherDashboard() {
 
           {/* MY CLASSES */}
           {activeNav === 'classes' && (
-            <div className="flex flex-col gap-6">
-              <div className="f1 flex items-start justify-between">
+            <div className="flex flex-col gap-5">
+              <div className="f1 flex items-start justify-between gap-3">
                 <div>
-                  <h1 className="text-[24px] font-extrabold text-[#0F172A]">My Classes</h1>
-                  <p className="text-[14px] text-[#475467] mt-1">Manage your classes and share codes with students.</p>
+                  <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">My Classes</h1>
+                  <p className="text-[14px] text-[#475467] mt-1">Manage your classes and share codes.</p>
                 </div>
-                <button
-                  onClick={() => setShowNewClass(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors flex-shrink-0"
-                >
-                  {Icons.plus} New Class
+                <button onClick={() => setShowNewClass(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors flex-shrink-0">
+                  {Icons.plus} New
                 </button>
               </div>
 
-              {/* New Class Form */}
               {showNewClass && (
-                <div className="f1 bg-white border border-[#E4E7EC] rounded-2xl p-6">
+                <div className="f1 bg-white border border-[#E4E7EC] rounded-2xl p-5">
                   <h3 className="text-[16px] font-bold text-[#0F172A] mb-4">Create New Class</h3>
                   <form onSubmit={handleCreateClass} className="flex flex-col gap-4">
                     <div>
                       <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Class Name</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. JSS 2B Mathematics"
+                      <input type="text" required placeholder="e.g. JSS 2B Mathematics"
                         value={newClassForm.name}
                         onChange={e => setNewClassForm({ ...newClassForm, name: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"
-                      />
+                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"/>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Subject</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. Mathematics"
+                        <input type="text" required placeholder="e.g. Mathematics"
                           value={newClassForm.subject}
                           onChange={e => setNewClassForm({ ...newClassForm, subject: e.target.value })}
-                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"
-                        />
+                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"/>
                       </div>
                       <div>
                         <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Level</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. JSS 2"
+                        <input type="text" required placeholder="e.g. JSS 2"
                           value={newClassForm.level}
                           onChange={e => setNewClassForm({ ...newClassForm, level: e.target.value })}
-                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"
-                        />
+                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"/>
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <button
-                        type="submit"
-                        disabled={creatingClass}
-                        className="px-6 py-2.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors"
-                      >
+                      <button type="submit" disabled={creatingClass}
+                        className="px-6 py-2.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors">
                         {creatingClass ? 'Creating...' : 'Create Class'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowNewClass(false)}
-                        className="px-6 py-2.5 bg-[#F1F5F9] text-[#475467] text-[13px] font-bold rounded-xl transition-colors"
-                      >
+                      <button type="button" onClick={() => setShowNewClass(false)}
+                        className="px-6 py-2.5 bg-[#F1F5F9] text-[#475467] text-[13px] font-bold rounded-xl">
                         Cancel
                       </button>
                     </div>
@@ -500,7 +480,7 @@ export default function TeacherDashboard() {
                 </div>
               )}
 
-              <div className="f2 flex flex-col gap-4">
+              <div className="f2 flex flex-col gap-3">
                 {classes.length === 0 ? (
                   <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
                     <p className="text-[14px] font-semibold text-[#0F172A]">No classes yet</p>
@@ -508,22 +488,20 @@ export default function TeacherDashboard() {
                   </div>
                 ) : (
                   classes.map((c, i) => (
-                    <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-6">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
-                          <h3 className="text-[16px] font-bold text-[#0F172A]">{c.name}</h3>
+                          <h3 className="text-[15px] font-bold text-[#0F172A]">{c.name}</h3>
                           <p className="text-[13px] text-[#94A3B8] mt-0.5">
                             {c.subject} · {c.level} · {students.filter(s => s.class_id === c.id).length} students
                           </p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <div className="px-4 py-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
-                            <span className="text-[16px] font-extrabold text-[#336b07] tracking-widest">{c.code}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="px-3 py-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
+                            <span className="text-[15px] font-extrabold text-[#336b07] tracking-widest">{c.code}</span>
                           </div>
-                          <button
-                            onClick={() => copyCode(c.code)}
-                            className="flex items-center gap-1.5 px-4 py-2 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors"
-                          >
+                          <button onClick={() => copyCode(c.code)}
+                            className="flex items-center gap-1.5 px-3 py-2 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors">
                             {Icons.copy} Copy
                           </button>
                         </div>
@@ -537,88 +515,51 @@ export default function TeacherDashboard() {
 
           {/* UPLOAD MATERIALS */}
           {activeNav === 'upload' && (
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               <div className="f1">
-                <h1 className="text-[24px] font-extrabold text-[#0F172A]">Upload Materials</h1>
+                <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Upload Materials</h1>
                 <p className="text-[14px] text-[#475467] mt-1">
-                  Upload notes or topics. Students get them as adaptive micro-lessons.
+                  Upload notes or topics for your students.
                 </p>
               </div>
-
-              <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
+              <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-8">
                 <form onSubmit={handleUpload} className="flex flex-col gap-4">
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Select Class</label>
-                    <select
-                      required
-                      value={uploadForm.class_id}
+                    <select required value={uploadForm.class_id}
                       onChange={e => setUploadForm({ ...uploadForm, class_id: e.target.value })}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#70AD47] transition-all appearance-none"
-                    >
+                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#70AD47] transition-all appearance-none">
                       <option value="">Choose a class</option>
                       {classes.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
                   </div>
-
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Material Title</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Chapter 3: Fractions"
+                    <input type="text" required placeholder="e.g. Chapter 3: Fractions"
                       value={uploadForm.title}
                       onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all"
-                    />
+                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all"/>
                   </div>
-
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
                       Description <span className="text-[#94A3B8] font-normal">(optional)</span>
                     </label>
-                    <textarea
-                      rows={3}
-                      placeholder="What does this material cover?"
+                    <textarea rows={3} placeholder="What does this material cover?"
                       value={uploadForm.description}
                       onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all resize-none"
-                    />
+                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all resize-none"/>
                   </div>
-
-                  <div
-                    className="border-2 border-dashed border-[#E4E7EC] hover:border-[#70AD47] rounded-xl p-8 text-center cursor-pointer transition-colors"
-                    onClick={() => document.getElementById('fileInput').click()}
-                  >
-                    <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">
-                      {Icons.upload}
-                    </div>
-                    <p className="text-[14px] font-semibold text-[#0F172A]">
-                      {uploadForm.file ? uploadForm.file.name : 'Click to upload PDF'}
-                    </p>
-                    <p className="text-[12px] text-[#94A3B8] mt-1">PDF files only · Max 10MB</p>
-                    <input
-                      id="fileInput"
-                      type="file"
-                      accept=".pdf"
-                      className="hidden"
-                      onChange={e => setUploadForm({ ...uploadForm, file: e.target.files[0] })}
-                    />
-                  </div>
-
                   <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
                     <p className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest mb-1">What happens after upload</p>
                     <p className="text-[13px] text-[#1E293B] leading-[1.6]">
-                      Pathfinder breaks your material into adaptive micro-lessons. Students get explanations at multiple levels with voice support — automatically.
+                      Students in this class will see your material in their Subjects page under "From Your Teacher".
                     </p>
                   </div>
-
-                  <button
-                    type="submit"
+                  <button type="submit"
                     disabled={uploading || !uploadForm.title || !uploadForm.class_id}
-                    className="w-full py-3.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors"
-                  >
+                    className="w-full py-3.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors">
                     {uploading ? 'Uploading...' : 'Upload Material'}
                   </button>
                 </form>
@@ -628,25 +569,21 @@ export default function TeacherDashboard() {
 
           {/* STUDENTS */}
           {activeNav === 'students' && (
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               <div className="f1">
-                <h1 className="text-[24px] font-extrabold text-[#0F172A]">Students</h1>
+                <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Students</h1>
                 <p className="text-[14px] text-[#475467] mt-1">All students across your classes.</p>
               </div>
 
-              {/* Class filter */}
               {classes.length > 1 && (
                 <div className="f2 flex items-center gap-2 flex-wrap">
                   {classes.map(c => (
-                    <button
-                      key={c.id}
-                      onClick={() => setSelectedClass(c)}
+                    <button key={c.id} onClick={() => setSelectedClass(c)}
                       className={`px-4 py-2 rounded-xl text-[13px] font-semibold transition-all border ${
                         selectedClass?.id === c.id
                           ? 'bg-[#336b07] text-white border-[#336b07]'
                           : 'bg-white text-[#475467] border-[#E4E7EC] hover:border-[#336b07]'
-                      }`}
-                    >
+                      }`}>
                       {c.name}
                     </button>
                   ))}
@@ -671,19 +608,20 @@ export default function TeacherDashboard() {
                 ) : (
                   <div className="flex flex-col gap-3">
                     {classStudents.map((s, i) => (
-                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-4">
+                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-[#136299] flex items-center justify-center text-white text-[14px] font-bold flex-shrink-0">
                           {s.profiles?.full_name?.[0]?.toUpperCase()}
                         </div>
-                        <div className="flex-1">
-                          <p className="text-[14px] font-semibold text-[#0F172A]">{s.profiles?.full_name}</p>
-                          <p className="text-[12px] text-[#94A3B8]">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name}</p>
+                          <p className="text-[12px] text-[#94A3B8] truncate">
                             {s.profiles?.grade_level} · {s.profiles?.email}
                           </p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[12px] font-semibold text-[#70AD47]">Active</p>
-                          <p className="text-[11px] text-[#94A3B8]">Joined {new Date(s.joined_at).toLocaleDateString()}</p>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-[11px] text-[#94A3B8]">
+                            {new Date(s.joined_at).toLocaleDateString()}
+                          </p>
                         </div>
                       </div>
                     ))}
@@ -695,27 +633,25 @@ export default function TeacherDashboard() {
 
           {/* SETTINGS */}
           {activeNav === 'settings' && (
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               <div className="f1">
-                <h1 className="text-[24px] font-extrabold text-[#0F172A]">Settings</h1>
+                <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Settings</h1>
                 <p className="text-[14px] text-[#475467] mt-1">Manage your account.</p>
               </div>
-              <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-6">
+              <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5">
                 <h2 className="text-[15px] font-bold text-[#0F172A] mb-4">Profile</h2>
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="w-14 h-14 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[20px] font-bold">
+                  <div className="w-14 h-14 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[20px] font-bold flex-shrink-0">
                     {firstName[0]?.toUpperCase()}
                   </div>
-                  <div>
-                    <p className="text-[16px] font-bold text-[#0F172A]">{profile?.full_name}</p>
-                    <p className="text-[13px] text-[#94A3B8]">{profile?.email}</p>
+                  <div className="min-w-0">
+                    <p className="text-[16px] font-bold text-[#0F172A] truncate">{profile?.full_name}</p>
+                    <p className="text-[13px] text-[#94A3B8] truncate">{profile?.email}</p>
                     <p className="text-[13px] text-[#94A3B8]">{profile?.school_name || 'No school set'}</p>
                   </div>
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-[#FFF1F1] text-[#BA1A1A] text-[14px] font-semibold rounded-xl hover:bg-[#FFE4E4] transition-colors"
-                >
+                <button onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#FFF1F1] text-[#BA1A1A] text-[14px] font-semibold rounded-xl hover:bg-[#FFE4E4] transition-colors">
                   {Icons.logout} Log Out
                 </button>
               </div>

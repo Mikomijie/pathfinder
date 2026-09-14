@@ -755,8 +755,9 @@ export default function Lesson() {
 
       </div>
 
-      {/* BOTTOM BAR */}
-      <div className="bg-white border-t border-[#E4E7EC] sticky bottom-0">
+      {/* BOTTOM BAR — stays above keyboard on mobile */}
+<div className="bg-white border-t border-[#E4E7EC] sticky bottom-0 safe-bottom"
+  style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="max-w-[760px] mx-auto px-5 md:px-8 py-4 flex items-center justify-between gap-3">
           <button onClick={handleExplainDifferently} disabled={currentLevel >= 4}
             className="flex items-center gap-2 px-5 py-3 bg-[#F8FAFC] border border-[#E4E7EC] hover:border-[#5B9BD5] disabled:opacity-40 disabled:cursor-not-allowed text-[#475467] text-[14px] font-semibold rounded-xl transition-all">
