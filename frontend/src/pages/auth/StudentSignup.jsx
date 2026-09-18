@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 
 const Logo = () => (
@@ -27,6 +27,7 @@ export default function StudentSignup() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
   const [form, setForm] = useState({
     full_name: '',
     email: '',
@@ -44,8 +45,15 @@ export default function StudentSignup() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+
+    // Password validation
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
@@ -82,7 +90,12 @@ export default function StudentSignup() {
         }
       }
 
-      navigate('/dashboard/student');
+      // Check if session exists — if not, email confirmation is required
+      if (data.session) {
+        navigate('/dashboard/student');
+      } else {
+        setEmailSent(true);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -91,6 +104,31 @@ export default function StudentSignup() {
   };
 
   const isUniversity = form.student_level === 'university';
+
+  // EMAIL CONFIRMATION SCREEN
+  if (emailSent) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF9] flex flex-col items-center justify-center px-6">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <div className="w-full max-w-[400px] text-center">
+          <div className="w-16 h-16 rounded-2xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-5">
+            <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-[#70AD47]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+          </div>
+          <h1 className="text-[24px] font-extrabold text-[#0F172A] mb-2">Check your email</h1>
+          <p className="text-[14px] text-[#475467] leading-[1.7] mb-6">
+            We sent a confirmation link to <span className="font-semibold text-[#0F172A]">{form.email}</span>. Click the link to activate your account then come back and log in.
+          </p>
+          <Link to="/login"
+            className="block w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[15px] font-bold rounded-xl transition-colors text-center">
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FCFAF9] flex flex-col">
@@ -134,35 +172,26 @@ export default function StudentSignup() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
-            {/* Full Name */}
             <div>
               <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Full Name</label>
               <input
-                name="full_name"
-                type="text"
-                required
+                name="full_name" type="text" required
                 placeholder="Your full name"
-                value={form.full_name}
-                onChange={handleChange}
+                value={form.full_name} onChange={handleChange}
                 className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
               />
             </div>
 
-            {/* Email */}
             <div>
               <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Email Address</label>
               <input
-                name="email"
-                type="email"
-                required
+                name="email" type="email" required
                 placeholder="your@email.com"
-                value={form.email}
-                onChange={handleChange}
+                value={form.email} onChange={handleChange}
                 className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
               />
             </div>
 
-            {/* Password */}
             <div>
               <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Password</label>
               <div className="relative">
@@ -171,15 +200,11 @@ export default function StudentSignup() {
                   type={showPassword ? 'text' : 'password'}
                   required
                   placeholder="At least 6 characters"
-                  value={form.password}
-                  onChange={handleChange}
+                  value={form.password} onChange={handleChange}
                   className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all pr-12"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#475467] transition-colors"
-                >
+                <button type="button" onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#475467] transition-colors">
                   {showPassword ? (
                     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                       <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
@@ -194,9 +219,11 @@ export default function StudentSignup() {
                   )}
                 </button>
               </div>
+              {form.password.length > 0 && form.password.length < 6 && (
+                <p className="text-[12px] text-[#BA1A1A] mt-1.5">Password must be at least 6 characters.</p>
+              )}
             </div>
 
-            {/* Student Level */}
             <div>
               <label className="text-[13px] font-semibold text-[#1E293B] block mb-2">What level are you?</label>
               <div className="grid grid-cols-2 gap-3">
@@ -224,16 +251,13 @@ export default function StudentSignup() {
                     )
                   }
                 ].map(level => (
-                  <button
-                    key={level.key}
-                    type="button"
+                  <button key={level.key} type="button"
                     onClick={() => setForm({ ...form, student_level: level.key, grade_level: '' })}
                     className={`p-4 rounded-xl border-2 text-left transition-all ${
                       form.student_level === level.key
                         ? 'border-[#5B9BD5] bg-[#EFF6FF]'
                         : 'border-[#E4E7EC] bg-white hover:border-[#5B9BD5]/50'
-                    }`}
-                  >
+                    }`}>
                     <div className={`mb-2 ${form.student_level === level.key ? 'text-[#136299]' : 'text-[#475467]'}`}>
                       {level.icon}
                     </div>
@@ -244,19 +268,13 @@ export default function StudentSignup() {
               </div>
             </div>
 
-            {/* Grade/Level dropdown */}
             {form.student_level && (
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
                   {isUniversity ? 'University Level' : 'Grade Level'}
                 </label>
-                <select
-                  name="grade_level"
-                  required
-                  value={form.grade_level}
-                  onChange={handleChange}
-                  className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all appearance-none"
-                >
+                <select name="grade_level" required value={form.grade_level} onChange={handleChange}
+                  className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all appearance-none">
                   <option value="">Select {isUniversity ? 'your level' : 'your grade'}</option>
                   {(isUniversity ? uniLevels : secondaryGrades).map(g => (
                     <option key={g} value={g}>{g}</option>
@@ -265,19 +283,14 @@ export default function StudentSignup() {
               </div>
             )}
 
-            {/* Class Code */}
             {form.student_level && (
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
-                  Class Code{' '}
-                  <span className="text-[#94A3B8] font-normal">(from your teacher — optional)</span>
+                  Class Code <span className="text-[#94A3B8] font-normal">(from your teacher — optional)</span>
                 </label>
-                <input
-                  name="class_code"
-                  type="text"
+                <input name="class_code" type="text"
                   placeholder="e.g. PATH-4821"
-                  value={form.class_code}
-                  onChange={handleChange}
+                  value={form.class_code} onChange={handleChange}
                   className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all uppercase"
                 />
                 <p className="text-[11px] text-[#94A3B8] mt-1.5">
@@ -286,29 +299,23 @@ export default function StudentSignup() {
               </div>
             )}
 
-            {/* School Name */}
             {form.student_level && (
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
                   {isUniversity ? 'University Name' : 'School Name'}{' '}
                   <span className="text-[#94A3B8] font-normal">(optional)</span>
                 </label>
-                <input
-                  name="school_name"
-                  type="text"
+                <input name="school_name" type="text"
                   placeholder={isUniversity ? 'Your university name' : 'Your school name'}
-                  value={form.school_name}
-                  onChange={handleChange}
+                  value={form.school_name} onChange={handleChange}
                   className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                 />
               </div>
             )}
 
-            <button
-              type="submit"
+            <button type="submit"
               disabled={loading || !form.student_level}
-              className="w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors mt-2"
-            >
+              className="w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors mt-2">
               {loading ? 'Creating account...' : 'Create Account'}
             </button>
 
@@ -316,7 +323,7 @@ export default function StudentSignup() {
 
           <p className="mt-6 text-center text-[14px] text-[#475467]">
             Already have an account?{' '}
-            <a href="/login" className="text-[#136299] font-semibold hover:underline">Log in</a>
+            <Link to="/login" className="text-[#136299] font-semibold hover:underline">Log in</Link>
           </p>
 
         </div>
