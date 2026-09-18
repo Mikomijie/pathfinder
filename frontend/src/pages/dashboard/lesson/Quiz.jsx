@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient';
 
@@ -40,11 +40,6 @@ const Icons = {
       <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
     </svg>
   ),
-  confetti: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5L12 2z"/>
-    </svg>
-  ),
 };
 
 const subjectColor = {
@@ -62,7 +57,7 @@ export default function Quiz() {
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [answers, setAnswers] = useState([]); // track all answers
+  const [answers, setAnswers] = useState([]);
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [nextTopic, setNextTopic] = useState(null);
@@ -85,7 +80,6 @@ export default function Quiz() {
         .limit(3);
       setQuestions(questionsData || []);
 
-      // Fetch next topic
       if (topicData) {
         const { data: nextTopics } = await supabase
           .from('topics')
@@ -115,8 +109,6 @@ export default function Quiz() {
     const q = questions[currentQ];
     const correctIndex = ['A','B','C','D'].indexOf(q.answer);
     const isCorrect = selectedAnswer === correctIndex;
-
-    // Record this answer
     const newAnswers = [...answers, { correct: isCorrect }];
     setAnswers(newAnswers);
 
@@ -125,11 +117,9 @@ export default function Quiz() {
       setSelectedAnswer(null);
       setShowAnswer(false);
     } else {
-      // Quiz complete — calculate final score from all answers
       setSaving(true);
       const totalCorrect = newAnswers.filter(a => a.correct).length;
       const scorePercent = Math.round((totalCorrect / questions.length) * 100);
-
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -154,10 +144,7 @@ export default function Quiz() {
   const color = topic ? (subjectColor[topic.subject] || '#5B9BD5') : '#5B9BD5';
   const q = questions[currentQ];
   const correctIndex = q ? ['A','B','C','D'].indexOf(q.answer) : -1;
-
-  // Calculate final score properly from answers array
   const finalScore = answers.filter(a => a.correct).length;
-  const percentage = questions.length > 0 ? Math.round((finalScore / questions.length) * 100) : 0;
   const stars = finalScore === questions.length ? 3 : finalScore >= Math.ceil(questions.length / 2) ? 2 : 1;
 
   if (loading) {
@@ -213,7 +200,6 @@ export default function Quiz() {
     );
   }
 
-  // FINISHED SCREEN
   if (finished) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
@@ -228,10 +214,8 @@ export default function Quiz() {
           .f4 { animation: fadeUp 0.5s 0.3s ease both; }
           .pop { animation: pop 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
         `}</style>
-
         <div className="text-center max-w-[480px] w-full">
 
-          {/* Score circle */}
           <div className="pop w-28 h-28 rounded-full flex items-center justify-center mx-auto mb-5 border-4"
             style={{ borderColor: color, background: `${color}15` }}>
             <div>
@@ -240,7 +224,6 @@ export default function Quiz() {
             </div>
           </div>
 
-          {/* Stars */}
           <div className="f1 flex items-center justify-center gap-2 mb-4">
             {[1,2,3].map(i => (
               <span key={i} style={{ color: i <= stars ? '#F59E0B' : '#E4E7EC' }}>
@@ -252,7 +235,6 @@ export default function Quiz() {
           <h1 className="f1 text-[28px] font-extrabold text-[#0F172A] mb-2">
             {finalScore === questions.length ? 'Perfect score!' : finalScore >= Math.ceil(questions.length / 2) ? 'Well done!' : 'Good effort!'}
           </h1>
-
           <p className="f2 text-[14px] text-[#475467] leading-[1.7] mb-2">
             You got <span className="font-bold" style={{ color }}>{finalScore} out of {questions.length}</span> correct.
           </p>
@@ -264,7 +246,6 @@ export default function Quiz() {
               : 'No worries at all — go back to the lesson and try again. There is no rush.'}
           </p>
 
-          {/* Topic complete badge */}
           <div className="f3 bg-white border border-[#E4E7EC] rounded-2xl p-5 mb-5 flex items-center gap-4 text-left">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
               style={{ background: color }}>
@@ -276,7 +257,6 @@ export default function Quiz() {
             </div>
           </div>
 
-          {/* NEXT TOPIC CARD */}
           {nextTopic && (
             <div className="f3 bg-[#0F172A] rounded-2xl p-5 mb-5 text-left">
               <p className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest mb-2">Up next</p>
@@ -289,7 +269,6 @@ export default function Quiz() {
             </div>
           )}
 
-          {/* Action buttons */}
           <div className="f4 flex flex-col sm:flex-row gap-3 justify-center">
             <button onClick={() => navigate(`/lesson/${topicId}`)}
               className="flex items-center justify-center gap-2 px-5 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
@@ -297,7 +276,7 @@ export default function Quiz() {
             </button>
             <button onClick={() => navigate(`/flashcards/${topicId}`)}
               className="flex items-center justify-center gap-2 px-5 py-3 bg-white border border-[#E4E7EC] hover:border-[#5B9BD5] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
-              {Icons.flashcard} Study Flashcards
+              {Icons.flashcard} Flashcards
             </button>
             <button onClick={() => navigate('/dashboard/student')}
               className="flex items-center justify-center gap-2 px-5 py-3 text-white text-[14px] font-bold rounded-xl transition-colors"
@@ -310,7 +289,6 @@ export default function Quiz() {
     );
   }
 
-  // QUIZ SCREEN
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col">
       <style>{`
@@ -320,7 +298,6 @@ export default function Quiz() {
         .fade { animation: fadeUp 0.4s ease forwards; }
       `}</style>
 
-      {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[680px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
           <button onClick={() => navigate(`/lesson/${topicId}`)}
@@ -343,17 +320,13 @@ export default function Quiz() {
             </div>
           </div>
         </div>
-
-        {/* Progress bar */}
         <div className="h-1 bg-[#F1F5F9]">
           <div className="h-1 transition-all duration-500"
-            style={{ width: `${((currentQ) / questions.length) * 100}%`, background: color }}/>
+            style={{ width: `${(currentQ / questions.length) * 100}%`, background: color }}/>
         </div>
       </header>
 
-      {/* CONTENT */}
       <div className="flex-1 max-w-[680px] mx-auto w-full px-5 md:px-8 py-8 flex flex-col gap-6">
-
         <div className="fade">
           <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color }}>
             {topic?.subject} · Quick Quiz
@@ -363,7 +336,6 @@ export default function Quiz() {
           </h1>
         </div>
 
-        {/* OPTIONS */}
         <div className="flex flex-col gap-3">
           {q && [q.option_a, q.option_b, q.option_c, q.option_d].map((option, i) => {
             const isSelected = selectedAnswer === i;
@@ -371,15 +343,9 @@ export default function Quiz() {
             let borderColor = '#E4E7EC';
             let bgColor = 'white';
             let textColor = '#1E293B';
-
-            if (showAnswer && isCorrect) {
-              borderColor = '#70AD47'; bgColor = '#F0FDF4'; textColor = '#336b07';
-            } else if (showAnswer && isSelected && !isCorrect) {
-              borderColor = '#BA1A1A'; bgColor = '#FFF1F1'; textColor = '#BA1A1A';
-            } else if (isSelected && !showAnswer) {
-              borderColor = color; bgColor = '#EFF6FF';
-            }
-
+            if (showAnswer && isCorrect) { borderColor = '#70AD47'; bgColor = '#F0FDF4'; textColor = '#336b07'; }
+            else if (showAnswer && isSelected && !isCorrect) { borderColor = '#BA1A1A'; bgColor = '#FFF1F1'; textColor = '#BA1A1A'; }
+            else if (isSelected && !showAnswer) { borderColor = color; bgColor = '#EFF6FF'; }
             return (
               <button key={i} onClick={() => handleAnswer(i)} disabled={showAnswer}
                 className="flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all active:scale-[0.99]"
@@ -399,7 +365,6 @@ export default function Quiz() {
           })}
         </div>
 
-        {/* FEEDBACK */}
         {showAnswer && (
           <div className={`fade p-4 rounded-xl border ${
             selectedAnswer === correctIndex ? 'bg-[#F0FDF4] border-[#BBF7D0]' : 'bg-[#FFF1F1] border-[#FFCDD2]'
@@ -417,17 +382,14 @@ export default function Quiz() {
           </div>
         )}
 
-        {/* ENCOURAGEMENT */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B]">
             Take your time. There is no penalty for wrong answers.
           </p>
         </div>
-
       </div>
 
-      {/* BOTTOM BAR */}
       {showAnswer && (
         <div className="bg-white border-t border-[#E4E7EC] sticky bottom-0">
           <div className="max-w-[680px] mx-auto px-5 md:px-8 py-4 flex justify-end">
