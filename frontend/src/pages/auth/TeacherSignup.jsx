@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 
 const Logo = () => (
@@ -38,6 +38,7 @@ export default function TeacherSignup() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     full_name: '',
@@ -61,6 +62,11 @@ export default function TeacherSignup() {
       setError('Please fill in all required fields.');
       return;
     }
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    setError('');
     setStep(2);
   };
 
@@ -98,13 +104,43 @@ export default function TeacherSignup() {
 
       if (classError) throw classError;
 
-      navigate('/dashboard/teacher');
+      // Check if session exists — if not, email confirmation is required
+      if (data.session) {
+        navigate('/dashboard/teacher');
+      } else {
+        setEmailSent(true);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  // EMAIL CONFIRMATION SCREEN
+  if (emailSent) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF9] flex flex-col items-center justify-center px-6">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <div className="w-full max-w-[400px] text-center">
+          <div className="w-16 h-16 rounded-2xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-5">
+            <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-[#70AD47]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+          </div>
+          <h1 className="text-[24px] font-extrabold text-[#0F172A] mb-2">Check your email</h1>
+          <p className="text-[14px] text-[#475467] leading-[1.7] mb-6">
+            We sent a confirmation link to <span className="font-semibold text-[#0F172A]">{form.email}</span>. Click the link to activate your account then come back and log in.
+          </p>
+          <Link to="/login"
+            className="block w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[15px] font-bold rounded-xl transition-colors text-center">
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FCFAF9] flex flex-col">
@@ -128,7 +164,6 @@ export default function TeacherSignup() {
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className="w-full max-w-[480px]">
 
-          {/* Step indicator */}
           <div className="flex items-center gap-2 mb-8 justify-center">
             {[1, 2].map(s => (
               <div key={s} className="flex items-center gap-2">
@@ -171,29 +206,20 @@ export default function TeacherSignup() {
           {/* STEP 1 */}
           {step === 1 && (
             <form onSubmit={handleNext} className="flex flex-col gap-4">
-
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Full Name</label>
-                <input
-                  name="full_name"
-                  type="text"
-                  required
+                <input name="full_name" type="text" required
                   placeholder="Your full name"
-                  value={form.full_name}
-                  onChange={handleChange}
+                  value={form.full_name} onChange={handleChange}
                   className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                 />
               </div>
 
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Email Address</label>
-                <input
-                  name="email"
-                  type="email"
-                  required
+                <input name="email" type="email" required
                   placeholder="your@email.com"
-                  value={form.email}
-                  onChange={handleChange}
+                  value={form.email} onChange={handleChange}
                   className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                 />
               </div>
@@ -201,20 +227,14 @@ export default function TeacherSignup() {
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Password</label>
                 <div className="relative">
-                  <input
-                    name="password"
+                  <input name="password"
                     type={showPassword ? 'text' : 'password'}
-                    required
-                    placeholder="At least 6 characters"
-                    value={form.password}
-                    onChange={handleChange}
+                    required placeholder="At least 6 characters"
+                    value={form.password} onChange={handleChange}
                     className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all pr-12"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#475467] transition-colors"
-                  >
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#475467] transition-colors">
                     {showPassword ? (
                       <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
@@ -229,37 +249,32 @@ export default function TeacherSignup() {
                     )}
                   </button>
                 </div>
+                {form.password.length > 0 && form.password.length < 6 && (
+                  <p className="text-[12px] text-[#BA1A1A] mt-1.5">Password must be at least 6 characters.</p>
+                )}
               </div>
 
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
                   School Name <span className="text-[#94A3B8] font-normal">(optional)</span>
                 </label>
-                <input
-                  name="school_name"
-                  type="text"
+                <input name="school_name" type="text"
                   placeholder="Your school or institution"
-                  value={form.school_name}
-                  onChange={handleChange}
+                  value={form.school_name} onChange={handleChange}
                   className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                 />
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[15px] font-bold rounded-xl transition-colors mt-2"
-              >
+              <button type="submit"
+                className="w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[15px] font-bold rounded-xl transition-colors mt-2">
                 Continue
               </button>
-
             </form>
           )}
 
           {/* STEP 2 */}
           {step === 2 && (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-
-              {/* Class Level First */}
               <div>
                 <label className="text-[13px] font-semibold text-[#1E293B] block mb-2">What level do you teach?</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -287,16 +302,13 @@ export default function TeacherSignup() {
                       )
                     }
                   ].map(level => (
-                    <button
-                      key={level.key}
-                      type="button"
+                    <button key={level.key} type="button"
                       onClick={() => setForm({ ...form, class_level: level.key, grade_level: '', subject: '' })}
                       className={`p-4 rounded-xl border-2 text-left transition-all ${
                         form.class_level === level.key
                           ? 'border-[#5B9BD5] bg-[#EFF6FF]'
                           : 'border-[#E4E7EC] bg-white hover:border-[#5B9BD5]/50'
-                      }`}
-                    >
+                      }`}>
                       <div className={`mb-2 ${form.class_level === level.key ? 'text-[#136299]' : 'text-[#475467]'}`}>
                         {level.icon}
                       </div>
@@ -307,111 +319,78 @@ export default function TeacherSignup() {
                 </div>
               </div>
 
-              {/* Secondary — pick specific grade */}
               {form.class_level === 'secondary' && (
                 <div>
                   <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Specific Class</label>
-                  <select
-                    name="grade_level"
-                    required
-                    value={form.grade_level}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all appearance-none"
-                  >
+                  <select name="grade_level" required value={form.grade_level} onChange={handleChange}
+                    className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all appearance-none">
                     <option value="">Select class</option>
-                    {secondaryGrades.map(g => (
-                      <option key={g} value={g}>{g}</option>
-                    ))}
+                    {secondaryGrades.map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
               )}
 
-              {/* University — type course */}
               {form.class_level === 'university' && (
                 <div>
                   <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Course / Department</label>
-                  <input
-                    name="grade_level"
-                    type="text"
-                    required
+                  <input name="grade_level" type="text" required
                     placeholder="e.g. Computer Science 300L"
-                    value={form.grade_level}
-                    onChange={handleChange}
+                    value={form.grade_level} onChange={handleChange}
                     className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                   />
                 </div>
               )}
 
-              {/* Subject — shows after level picked */}
               {form.class_level && (
                 <div>
                   <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Subject You Teach</label>
                   {form.class_level === 'university' ? (
-                    <input
-                      name="subject"
-                      type="text"
-                      required
+                    <input name="subject" type="text" required
                       placeholder="e.g. Organic Chemistry, Data Structures"
-                      value={form.subject}
-                      onChange={handleChange}
+                      value={form.subject} onChange={handleChange}
                       className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                     />
                   ) : (
-                    <select
-                      name="subject"
-                      required
-                      value={form.subject}
-                      onChange={handleChange}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all appearance-none"
-                    >
+                    <select name="subject" required value={form.subject} onChange={handleChange}
+                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all appearance-none">
                       <option value="">Select subject</option>
-                      {secondarySubjects.map(s => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
+                      {secondarySubjects.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   )}
                 </div>
               )}
 
-              {/* Class Name */}
               {form.class_level && (
                 <div>
                   <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
                     Class Name <span className="text-[#94A3B8] font-normal">(optional)</span>
                   </label>
-                  <input
-                    name="class_name"
-                    type="text"
+                  <input name="class_name" type="text"
                     placeholder={form.class_level === 'university' ? 'e.g. CSC 301 Morning Class' : 'e.g. JSS 2A Mathematics'}
-                    value={form.class_name}
-                    onChange={handleChange}
+                    value={form.class_name} onChange={handleChange}
                     className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#5B9BD5] focus:ring-2 focus:ring-[#5B9BD5]/10 transition-all"
                   />
                 </div>
               )}
 
-              {/* Info box */}
               <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
                 <p className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest mb-1">What happens next</p>
                 <p className="text-[13px] text-[#1E293B] leading-[1.6]">
-                  After signup you'll get a unique class code to share with your students. They use it to join your class and access your materials.
+                  After signup you will get a unique class code to share with your students. They use it to join your class and access your materials.
                 </p>
               </div>
 
-              <button
-                type="submit"
+              <button type="submit"
                 disabled={loading || !form.class_level || !form.subject}
-                className="w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors mt-2"
-              >
+                className="w-full py-3.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors mt-2">
                 {loading ? 'Creating account...' : 'Create Account & Class'}
               </button>
-
             </form>
           )}
 
           <p className="mt-6 text-center text-[14px] text-[#475467]">
             Already have an account?{' '}
-            <a href="/login" className="text-[#136299] font-semibold hover:underline">Log in</a>
+            <Link to="/login" className="text-[#136299] font-semibold hover:underline">Log in</Link>
           </p>
 
         </div>

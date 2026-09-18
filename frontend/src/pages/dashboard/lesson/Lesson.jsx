@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient';
 
@@ -63,7 +63,6 @@ const subjectColor = {
   'Basic Science': '#F59E0B',
 };
 
-// SVG VISUALS FOR LEVEL 3
 const TopicVisuals = {
   'Introduction to Fractions': (
     <div className="flex flex-col items-center gap-6">
@@ -359,11 +358,13 @@ function GenericVisual({ text }) {
 export default function Lesson() {
   const { topicId } = useParams();
   const navigate = useNavigate();
+  const isMounted = useRef(true);
 
   const [topic, setTopic] = useState(null);
   const [lesson, setLesson] = useState(null);
   const [currentLevel, setCurrentLevel] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [understood, setUnderstood] = useState(false);
   const [quizQuestion, setQuizQuestion] = useState(null);
@@ -374,8 +375,12 @@ export default function Lesson() {
   const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
 
   useEffect(() => {
+    isMounted.current = true;
     fetchLesson();
-    return () => window.speechSynthesis?.cancel();
+    return () => {
+      isMounted.current = false;
+      window.speechSynthesis?.cancel();
+    };
   }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -390,6 +395,12 @@ export default function Lesson() {
       const { data: lessonData } = await supabase
         .from('lessons').select('*').eq('topic_id', topicId).single();
 
+      // Null guard — topic or lesson not found
+      if (!topicData || !lessonData) {
+        if (isMounted.current) setNotFound(true);
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {
@@ -400,7 +411,7 @@ export default function Lesson() {
           .eq('topic_id', topicId)
           .maybeSingle();
 
-        if (progressData) {
+        if (progressData && isMounted.current) {
           if (progressData.completed) {
             setIsCompleted(true);
             setCurrentLevel(progressData.level_reached || 4);
@@ -409,7 +420,6 @@ export default function Lesson() {
           }
         }
 
-        // Fetch next topic in same subject
         if (topicData) {
           const { data: nextTopics } = await supabase
             .from('topics')
@@ -419,18 +429,21 @@ export default function Lesson() {
             .order('order_index', { ascending: true })
             .limit(1);
 
-          if (nextTopics && nextTopics.length > 0) {
+          if (nextTopics && nextTopics.length > 0 && isMounted.current) {
             setNextTopic(nextTopics[0]);
           }
         }
       }
 
-      setTopic(topicData);
-      setLesson(lessonData);
+      if (isMounted.current) {
+        setTopic(topicData);
+        setLesson(lessonData);
+      }
     } catch (err) {
       console.error(err);
+      if (isMounted.current) setNotFound(true);
     } finally {
-      setLoading(false);
+      if (isMounted.current) setLoading(false);
     }
   };
 
@@ -444,20 +457,21 @@ export default function Lesson() {
 
       if (data && data.length > 0) {
         const random = data[Math.floor(Math.random() * data.length)];
-        setQuizQuestion({
-          question: random.question,
-          options: [random.option_a, random.option_b, random.option_c, random.option_d],
-          answer: ['A','B','C','D'].indexOf(random.answer),
-          explanation: `The correct answer is option ${random.answer}.`
-        });
+        if (isMounted.current) {
+          setQuizQuestion({
+            question: random.question,
+            options: [random.option_a, random.option_b, random.option_c, random.option_d],
+            answer: ['A','B','C','D'].indexOf(random.answer),
+            explanation: `The correct answer is option ${random.answer}.`
+          });
+        }
       } else if (lesson) {
-        // AI-generated topic — generate question via OpenRouter
         try {
           const { generateInteractiveQuestion } = await import('../../../services/openrouter');
           const q = await generateInteractiveQuestion(topic?.title, lesson?.level_1);
-          if (q) setQuizQuestion(q);
+          if (q && isMounted.current) setQuizQuestion(q);
         } catch {
-          // Silently fail — show nothing rather than crash
+          // Silently fail
         }
       }
     } catch (err) {
@@ -485,7 +499,7 @@ export default function Lesson() {
       v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
     ) || voices.find(v => v.lang.startsWith('en'));
     if (preferred) utterance.voice = preferred;
-    utterance.onend = () => setSpeaking(false);
+    utterance.onend = () => { if (isMounted.current) setSpeaking(false); };
     window.speechSynthesis.speak(utterance);
     setSpeaking(true);
   };
@@ -496,7 +510,6 @@ export default function Lesson() {
     setCurrentLevel(newLevel);
     setSpeaking(false);
     window.speechSynthesis?.cancel();
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -516,7 +529,6 @@ export default function Lesson() {
     setUnderstood(true);
     window.speechSynthesis?.cancel();
     setSpeaking(false);
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -530,7 +542,6 @@ export default function Lesson() {
     } catch (err) {
       console.error(err);
     }
-
     setTimeout(() => navigate(`/lesson/${topicId}/quiz`), 600);
   };
 
@@ -540,12 +551,28 @@ export default function Lesson() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 rounded-full border-2 border-[#E4E7EC]"
             style={{ borderTopColor: '#5B9BD5', animation: 'spin 1s linear infinite' }}/>
           <p className="text-[14px] text-[#475467]">Loading lesson...</p>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
+        <div className="text-center max-w-[360px]">
+          <p className="text-[20px] font-extrabold text-[#0F172A] mb-2">Lesson not found</p>
+          <p className="text-[14px] text-[#475467] mb-5 leading-[1.6]">
+            This lesson does not exist or may have been removed.
+          </p>
+          <button onClick={() => navigate('/dashboard/student')}
+            className="px-6 py-3 bg-[#136299] text-white text-[14px] font-bold rounded-xl">
+            Back to Dashboard
+          </button>
         </div>
       </div>
     );
@@ -563,7 +590,6 @@ export default function Lesson() {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
-      {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[760px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
           <button onClick={() => { window.speechSynthesis?.cancel(); navigate(-1); }}
@@ -590,10 +616,8 @@ export default function Lesson() {
         </div>
       </header>
 
-      {/* CONTENT */}
       <div className="flex-1 max-w-[760px] mx-auto w-full px-5 md:px-8 py-8 flex flex-col gap-6">
 
-        {/* COMPLETED BANNER */}
         {isCompleted && (
           <div className="fade bg-[#F0FDF4] border-2 border-[#70AD47] rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -620,7 +644,6 @@ export default function Lesson() {
           </div>
         )}
 
-        {/* TOPIC + LEVEL INFO */}
         <div className="fade">
           <p className="text-[11px] font-bold uppercase tracking-widest mb-1" style={{ color }}>
             {topic?.subject} · {levelLabels[currentLevel].label}
@@ -629,7 +652,6 @@ export default function Lesson() {
           <p className="text-[13px] text-[#94A3B8] mt-1">{levelLabels[currentLevel].desc}</p>
         </div>
 
-        {/* LEVEL TABS */}
         <div className="flex items-center gap-2 flex-wrap">
           {[1,2,3,4].map(l => (
             <button key={l}
@@ -645,7 +667,6 @@ export default function Lesson() {
           ))}
         </div>
 
-        {/* LEVEL 1 — Simple */}
         {currentLevel === 1 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             <p className="text-[16px] md:text-[17px] text-[#1E293B] leading-[1.9] whitespace-pre-line">
@@ -654,7 +675,6 @@ export default function Lesson() {
           </div>
         )}
 
-        {/* LEVEL 2 — Analogy */}
         {currentLevel === 2 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             <p className="text-[16px] md:text-[17px] text-[#1E293B] leading-[1.9] whitespace-pre-line">
@@ -663,14 +683,12 @@ export default function Lesson() {
           </div>
         )}
 
-        {/* LEVEL 3 — Visual */}
         {currentLevel === 3 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             {hardcodedVisual ? hardcodedVisual : <GenericVisual text={lesson?.level_3}/>}
           </div>
         )}
 
-        {/* LEVEL 4 — Interactive */}
         {currentLevel === 4 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             {quizQuestion ? (
@@ -688,15 +706,9 @@ export default function Lesson() {
                     let borderColor = '#E4E7EC';
                     let bgColor = 'white';
                     let textColor = '#1E293B';
-
-                    if (showAnswer && isCorrect) {
-                      borderColor = '#70AD47'; bgColor = '#F0FDF4'; textColor = '#336b07';
-                    } else if (showAnswer && isSelected && !isCorrect) {
-                      borderColor = '#BA1A1A'; bgColor = '#FFF1F1'; textColor = '#BA1A1A';
-                    } else if (isSelected && !showAnswer) {
-                      borderColor = color; bgColor = '#EFF6FF';
-                    }
-
+                    if (showAnswer && isCorrect) { borderColor = '#70AD47'; bgColor = '#F0FDF4'; textColor = '#336b07'; }
+                    else if (showAnswer && isSelected && !isCorrect) { borderColor = '#BA1A1A'; bgColor = '#FFF1F1'; textColor = '#BA1A1A'; }
+                    else if (isSelected && !showAnswer) { borderColor = color; bgColor = '#EFF6FF'; }
                     return (
                       <button key={i}
                         onClick={() => { if (!showAnswer) { setSelectedAnswer(i); setShowAnswer(true); } }}
@@ -712,7 +724,6 @@ export default function Lesson() {
                     );
                   })}
                 </div>
-
                 {showAnswer && (
                   <div className={`mt-5 p-4 rounded-xl border ${
                     selectedAnswer === quizQuestion.answer ? 'bg-[#F0FDF4] border-[#BBF7D0]' : 'bg-[#FFF1F1] border-[#FFCDD2]'
@@ -742,7 +753,6 @@ export default function Lesson() {
           </div>
         )}
 
-        {/* ENCOURAGEMENT */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B] leading-[1.6]">
@@ -752,12 +762,10 @@ export default function Lesson() {
             {currentLevel === 4 && "Have a go at the question. There is no wrong answer for trying."}
           </p>
         </div>
-
       </div>
 
-      {/* BOTTOM BAR — stays above keyboard on mobile */}
-<div className="bg-white border-t border-[#E4E7EC] sticky bottom-0 safe-bottom"
-  style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="bg-white border-t border-[#E4E7EC] sticky bottom-0"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="max-w-[760px] mx-auto px-5 md:px-8 py-4 flex items-center justify-between gap-3">
           <button onClick={handleExplainDifferently} disabled={currentLevel >= 4}
             className="flex items-center gap-2 px-5 py-3 bg-[#F8FAFC] border border-[#E4E7EC] hover:border-[#5B9BD5] disabled:opacity-40 disabled:cursor-not-allowed text-[#475467] text-[14px] font-semibold rounded-xl transition-all">

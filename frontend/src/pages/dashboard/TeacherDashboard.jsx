@@ -109,51 +109,62 @@ export default function TeacherDashboard() {
   const [students, setStudents] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [activeNav, setActiveNav] = useState('home');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showNewClass, setShowNewClass] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
-  const [uploadForm, setUploadForm] = useState({ title: '', description: '', class_id: '', file: null });
+  const [uploadForm, setUploadForm] = useState({ title: '', description: '', class_id: '' });
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [newClassForm, setNewClassForm] = useState({ name: '', subject: '', level: '' });
   const [creatingClass, setCreatingClass] = useState(false);
+  const [classError, setClassError] = useState('');
 
   const fetchAll = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { navigate('/login'); return; }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { navigate('/login'); return; }
 
-    const { data: profileData } = await supabase
-      .from('profiles').select('*').eq('id', user.id).single();
-    setProfile(profileData);
+      const { data: profileData, error: profileErr } = await supabase
+        .from('profiles').select('*').eq('id', user.id).single();
+      if (profileErr) throw profileErr;
+      setProfile(profileData);
 
-    const { data: classesData } = await supabase
-      .from('classes').select('*').eq('teacher_id', user.id)
-      .order('created_at', { ascending: false });
-    setClasses(classesData || []);
-
-    if (classesData?.length > 0) {
-      setSelectedClass(prev => prev || classesData[0]);
-      const classIds = classesData.map(c => c.id);
-
-      const { data: membersData } = await supabase
-        .from('class_members')
-        .select('*, profiles(full_name, email, grade_level, student_level)')
-        .in('class_id', classIds);
-      setStudents(membersData || []);
-
-      const { data: materialsData } = await supabase
-        .from('class_materials').select('*').in('class_id', classIds)
+      const { data: classesData, error: classesErr } = await supabase
+        .from('classes').select('*').eq('teacher_id', user.id)
         .order('created_at', { ascending: false });
-      setMaterials(materialsData || []);
-    }
+      if (classesErr) throw classesErr;
+      setClasses(classesData || []);
 
-    setLoading(false);
+      if (classesData && classesData.length > 0) {
+        setSelectedClass(prev => prev || classesData[0]);
+        const classIds = classesData.map(c => c.id);
+
+        const { data: membersData } = await supabase
+          .from('class_members')
+          .select('*, profiles(full_name, email, grade_level, student_level)')
+          .in('class_id', classIds);
+        setStudents(membersData || []);
+
+        const { data: materialsData } = await supabase
+          .from('class_materials').select('*').in('class_id', classIds)
+          .order('created_at', { ascending: false });
+        setMaterials(materialsData || []);
+      }
+    } catch (err) {
+      console.error(err);
+      setFetchError('Could not load your dashboard. Please refresh the page.');
+    } finally {
+      setLoading(false);
+    }
   }, [navigate]);
 
   useEffect(() => {
     fetchAll();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchAll]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -170,6 +181,8 @@ export default function TeacherDashboard() {
     e.preventDefault();
     if (!uploadForm.title || !uploadForm.class_id) return;
     setUploading(true);
+    setUploadError('');
+    setUploadSuccess(false);
     try {
       const { error } = await supabase.from('class_materials').insert({
         class_id: uploadForm.class_id,
@@ -177,11 +190,13 @@ export default function TeacherDashboard() {
         description: uploadForm.description,
       });
       if (error) throw error;
-      setUploadForm({ title: '', description: '', class_id: '', file: null });
+      setUploadForm({ title: '', description: '', class_id: '' });
+      setUploadSuccess(true);
       fetchAll();
-      setActiveNav('home');
+      setTimeout(() => setUploadSuccess(false), 3000);
     } catch (err) {
       console.error(err);
+      setUploadError('Could not upload material. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -190,6 +205,7 @@ export default function TeacherDashboard() {
   const handleCreateClass = async (e) => {
     e.preventDefault();
     setCreatingClass(true);
+    setClassError('');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const code = generateCode();
@@ -206,6 +222,7 @@ export default function TeacherDashboard() {
       fetchAll();
     } catch (err) {
       console.error(err);
+      setClassError('Could not create class. Please try again.');
     } finally {
       setCreatingClass(false);
     }
@@ -232,6 +249,22 @@ export default function TeacherDashboard() {
         <div className="flex flex-col items-center gap-3">
           {Icons.logo}
           <p className="text-[14px] text-[#475467]">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center px-6">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <div className="text-center max-w-[360px]">
+          <p className="text-[16px] font-bold text-[#0F172A] mb-2">Something went wrong</p>
+          <p className="text-[14px] text-[#475467] mb-5">{fetchError}</p>
+          <button onClick={() => { setFetchError(''); setLoading(true); fetchAll(); }}
+            className="px-6 py-2.5 bg-[#136299] text-white text-[13px] font-bold rounded-xl">
+            Try Again
+          </button>
         </div>
       </div>
     );
@@ -268,9 +301,7 @@ export default function TeacherDashboard() {
 
         <div className="px-4 py-3 border-b border-[#E4E7EC] flex-shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 bg-[#F0FDF4] rounded-xl">
-            <div className="w-6 h-6 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[11px] font-bold">
-              T
-            </div>
+            <div className="w-6 h-6 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[11px] font-bold">T</div>
             <span className="text-[12px] font-semibold text-[#336b07]">Teacher Account</span>
           </div>
         </div>
@@ -326,12 +357,11 @@ export default function TeacherDashboard() {
                   Welcome, {firstName}.
                 </h1>
                 <p className="text-[14px] text-[#475467] mt-1">
-                  Here's what's happening across your classes today.
+                  Here is what is happening across your classes today.
                 </p>
               </div>
 
-              {/* Class Code Card */}
-              {primaryClass && (
+              {primaryClass ? (
                 <div className="f2 bg-[#1A3A2A] rounded-2xl p-5 md:p-7">
                   <span className="text-[10px] font-bold text-[#70AD47] uppercase tracking-widest">
                     Your Primary Class Code
@@ -355,9 +385,7 @@ export default function TeacherDashboard() {
                     Share this code with your students. They enter it during signup to join your class.
                   </p>
                 </div>
-              )}
-
-              {!primaryClass && (
+              ) : (
                 <div className="f2 bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
                   <p className="text-[15px] font-bold text-[#0F172A] mb-2">No classes yet</p>
                   <p className="text-[13px] text-[#475467] mb-4">Create your first class to get a code to share with students.</p>
@@ -368,7 +396,6 @@ export default function TeacherDashboard() {
                 </div>
               )}
 
-              {/* Quick Stats */}
               <div className="f3 grid grid-cols-3 gap-3">
                 {[
                   { label: 'Total Students', value: students.length.toString(), color: '#136299', bg: '#EFF6FF' },
@@ -382,7 +409,6 @@ export default function TeacherDashboard() {
                 ))}
               </div>
 
-              {/* Recent Materials */}
               <div className="f4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-[15px] font-bold text-[#0F172A]">Recent Materials</h2>
@@ -439,6 +465,12 @@ export default function TeacherDashboard() {
                 </button>
               </div>
 
+              {classError && (
+                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A] font-medium">
+                  {classError}
+                </div>
+              )}
+
               {showNewClass && (
                 <div className="f1 bg-white border border-[#E4E7EC] rounded-2xl p-5">
                   <h3 className="text-[16px] font-bold text-[#0F172A] mb-4">Create New Class</h3>
@@ -471,7 +503,7 @@ export default function TeacherDashboard() {
                         className="px-6 py-2.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors">
                         {creatingClass ? 'Creating...' : 'Create Class'}
                       </button>
-                      <button type="button" onClick={() => setShowNewClass(false)}
+                      <button type="button" onClick={() => { setShowNewClass(false); setClassError(''); }}
                         className="px-6 py-2.5 bg-[#F1F5F9] text-[#475467] text-[13px] font-bold rounded-xl">
                         Cancel
                       </button>
@@ -518,10 +550,21 @@ export default function TeacherDashboard() {
             <div className="flex flex-col gap-5">
               <div className="f1">
                 <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Upload Materials</h1>
-                <p className="text-[14px] text-[#475467] mt-1">
-                  Upload notes or topics for your students.
-                </p>
+                <p className="text-[14px] text-[#475467] mt-1">Upload notes or topics for your students.</p>
               </div>
+
+              {uploadError && (
+                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A] font-medium">
+                  {uploadError}
+                </div>
+              )}
+
+              {uploadSuccess && (
+                <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl text-[13px] text-[#336b07] font-medium flex items-center gap-2">
+                  {Icons.check} Material uploaded successfully. Students can now see it.
+                </div>
+              )}
+
               <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-8">
                 <form onSubmit={handleUpload} className="flex flex-col gap-4">
                   <div>
@@ -530,9 +573,7 @@ export default function TeacherDashboard() {
                       onChange={e => setUploadForm({ ...uploadForm, class_id: e.target.value })}
                       className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#70AD47] transition-all appearance-none">
                       <option value="">Choose a class</option>
-                      {classes.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
+                      {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
                   <div>
@@ -618,11 +659,9 @@ export default function TeacherDashboard() {
                             {s.profiles?.grade_level} · {s.profiles?.email}
                           </p>
                         </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-[11px] text-[#94A3B8]">
-                            {new Date(s.joined_at).toLocaleDateString()}
-                          </p>
-                        </div>
+                        <p className="text-[11px] text-[#94A3B8] flex-shrink-0">
+                          {new Date(s.joined_at).toLocaleDateString()}
+                        </p>
                       </div>
                     ))}
                   </div>
