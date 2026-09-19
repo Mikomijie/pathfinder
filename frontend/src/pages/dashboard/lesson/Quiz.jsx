@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient';
+import { generateQuiz } from '../../../services/openrouter';
 
 const Icons = {
   back: (
@@ -60,6 +61,7 @@ export default function Quiz() {
   const [answers, setAnswers] = useState([]);
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
   const [nextTopic, setNextTopic] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -78,7 +80,38 @@ export default function Quiz() {
         .select('*')
         .eq('topic_id', topicId)
         .limit(3);
-      setQuestions(questionsData || []);
+
+      if (questionsData && questionsData.length > 0) {
+        setQuestions(questionsData);
+      } else {
+        setGenerating(true);
+        try {
+          const { data: lessonData } = await supabase
+            .from('lessons').select('level_1').eq('topic_id', topicId).single();
+
+          const aiQuestions = await generateQuiz(
+            topicData?.title,
+            lessonData?.level_1
+          );
+
+          if (aiQuestions && aiQuestions.length > 0) {
+            const formatted = aiQuestions.map(q => ({
+              question: q.question,
+              option_a: q.options[0],
+              option_b: q.options[1],
+              option_c: q.options[2],
+              option_d: q.options[3],
+              answer: ['A','B','C','D'][q.answer] || 'A',
+              explanation: q.explanation,
+            }));
+            setQuestions(formatted);
+          }
+        } catch (err) {
+          console.error('AI quiz generation failed:', err);
+        } finally {
+          setGenerating(false);
+        }
+      }
 
       if (topicData) {
         const { data: nextTopics } = await supabase
@@ -96,6 +129,24 @@ export default function Quiz() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveProgress = async (scorePercent) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('student_progress').upsert({
+          student_id: user.id,
+          topic_id: topicId,
+          level_reached: 4,
+          completed: true,
+          last_studied_at: new Date().toISOString(),
+          score: scorePercent,
+        }, { onConflict: 'student_id,topic_id' });
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -120,24 +171,9 @@ export default function Quiz() {
       setSaving(true);
       const totalCorrect = newAnswers.filter(a => a.correct).length;
       const scorePercent = Math.round((totalCorrect / questions.length) * 100);
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase.from('student_progress').upsert({
-            student_id: user.id,
-            topic_id: topicId,
-            level_reached: 4,
-            completed: true,
-            last_studied_at: new Date().toISOString(),
-            score: scorePercent,
-          }, { onConflict: 'student_id,topic_id' });
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setSaving(false);
-        setFinished(true);
-      }
+      await saveProgress(scorePercent);
+      setSaving(false);
+      setFinished(true);
     }
   };
 
@@ -145,9 +181,10 @@ export default function Quiz() {
   const q = questions[currentQ];
   const correctIndex = q ? ['A','B','C','D'].indexOf(q.answer) : -1;
   const finalScore = answers.filter(a => a.correct).length;
-  const stars = finalScore === questions.length ? 3 : finalScore >= Math.ceil(questions.length / 2) ? 2 : 1;
+  const stars = finalScore === questions.length ? 3
+    : finalScore >= Math.ceil(questions.length / 2) ? 2 : 1;
 
-  if (loading) {
+  if (loading || generating) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
         <style>{`
@@ -157,14 +194,17 @@ export default function Quiz() {
         `}</style>
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 rounded-full border-2 border-[#E4E7EC]"
-            style={{ borderTopColor: '#5B9BD5', animation: 'spin 1s linear infinite' }}/>
-          <p className="text-[14px] text-[#475467]">Loading quiz...</p>
+            style={{ borderTopColor: color, animation: 'spin 1s linear infinite' }}/>
+          <p className="text-[14px] text-[#475467]">
+            {generating ? 'Preparing your quiz...' : 'Loading quiz...'}
+          </p>
         </div>
       </div>
     );
   }
 
   if (questions.length === 0) {
+    saveProgress(100);
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
@@ -174,7 +214,7 @@ export default function Quiz() {
           </div>
           <h2 className="text-[22px] font-extrabold text-[#0F172A] mb-2">Lesson Complete!</h2>
           <p className="text-[14px] text-[#475467] mb-6 leading-[1.7]">
-            No quiz questions for this topic yet. Your progress has been saved.
+            You finished this lesson. Your progress has been saved.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <button onClick={() => navigate(`/flashcards/${topicId}`)}
@@ -233,7 +273,9 @@ export default function Quiz() {
           </div>
 
           <h1 className="f1 text-[28px] font-extrabold text-[#0F172A] mb-2">
-            {finalScore === questions.length ? 'Perfect score!' : finalScore >= Math.ceil(questions.length / 2) ? 'Well done!' : 'Good effort!'}
+            {finalScore === questions.length ? 'Perfect score!'
+              : finalScore >= Math.ceil(questions.length / 2) ? 'Well done!'
+              : 'Good effort!'}
           </h1>
           <p className="f2 text-[14px] text-[#475467] leading-[1.7] mb-2">
             You got <span className="font-bold" style={{ color }}>{finalScore} out of {questions.length}</span> correct.

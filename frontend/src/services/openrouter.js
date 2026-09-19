@@ -41,7 +41,6 @@ async function callOpenRouter(prompt, maxTokens = 400) {
 
   let content = data.choices[0].message.content;
 
-  // Clean any markdown wrapping
   content = content
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
@@ -148,11 +147,17 @@ export async function generateLessonFromText(topicTitle, subject, contentText) {
 Based on this content: "${contentText.slice(0, 2000)}"
 
 Return ONLY this JSON object:
-{"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps)","level_4":"Think about this: one reflective question to check understanding"}
+{"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps)","level_4":"Think about this: one reflective question to check understanding","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point under 10 words"},{"label":"Step 2","text":"second key point under 10 words"},{"label":"Step 3","text":"third key point under 10 words"}]}}
 
-Keep all levels appropriate for the student's level. Use simple, encouraging language.`;
+The level_3_visual type must be one of:
+- "steps" for processes or sequences
+- "compare" for comparisons (items have "left" and "right" keys)
+- "terms" for key vocabulary (items have "term" and "definition" keys)
 
-    const text = await callOpenRouter(prompt, 800);
+Pick the type that best fits the topic content.
+Keep all levels appropriate for the student. Use simple, encouraging language.`;
+
+    const text = await callOpenRouter(prompt, 1000);
     return extractJSON(text, false);
   } catch (err) {
     console.error('generateLessonFromText error:', err.message);

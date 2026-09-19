@@ -37,11 +37,6 @@ const Icons = {
       <polyline points="20 6 9 17 4 12"/>
     </svg>
   ),
-  star: (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-    </svg>
-  ),
   flashcard: (
     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <rect x="2" y="5" width="20" height="14" rx="2"/>
@@ -63,6 +58,7 @@ const subjectColor = {
   'Basic Science': '#F59E0B',
 };
 
+// ─── HARDCODED VISUALS for the 9 pre-built topics ──────────────────────────
 const TopicVisuals = {
   'Introduction to Fractions': (
     <div className="flex flex-col items-center gap-6">
@@ -233,9 +229,6 @@ const TopicVisuals = {
           <p className="text-[12px] text-white/80 mt-0.5">Concluding Sentence — wraps everything up</p>
         </div>
       </div>
-      <p className="text-[12px] text-[#475467] text-center max-w-[280px]">
-        Just like a burger needs all three parts — so does a good paragraph.
-      </p>
     </div>
   ),
   'Photosynthesis': (
@@ -329,14 +322,106 @@ const TopicVisuals = {
           </div>
         ))}
       </div>
-      <div className="bg-white border border-[#E4E7EC] rounded-xl p-3 w-full max-w-[360px] text-center">
-        <p className="text-[12px] text-[#475467]">
-          Water exists in all 3 states: <span className="font-bold text-[#5B9BD5]">ice</span>, <span className="font-bold text-[#70AD47]">water</span>, and <span className="font-bold text-[#F59E0B]">steam</span>
-        </p>
-      </div>
     </div>
   ),
 };
+
+// ─── DYNAMIC VISUAL for AI-generated topics ─────────────────────────────────
+function DynamicVisual({ visualData, color }) {
+  if (!visualData) return null;
+
+  let parsed = visualData;
+  if (typeof visualData === 'string') {
+    try { parsed = JSON.parse(visualData); } catch { return null; }
+  }
+
+  const accentColor = color || '#5B9BD5';
+  const accentBg = `${accentColor}15`;
+
+  if (parsed.type === 'steps') {
+    return (
+      <div className="flex flex-col gap-4">
+        {parsed.title && (
+          <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest text-center">
+            {parsed.title}
+          </p>
+        )}
+        <div className="flex flex-col gap-3">
+          {(parsed.items || []).map((item, i) => (
+            <div key={i} className="flex items-start gap-4 bg-white border border-[#E4E7EC] rounded-xl p-4">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[13px] font-bold flex-shrink-0"
+                style={{ background: accentColor }}>
+                {i + 1}
+              </div>
+              <div>
+                {item.label && <p className="text-[12px] font-bold uppercase tracking-wide mb-0.5" style={{ color: accentColor }}>{item.label}</p>}
+                <p className="text-[14px] text-[#1E293B] leading-[1.6]">{item.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (parsed.type === 'terms') {
+    return (
+      <div className="flex flex-col gap-4">
+        {parsed.title && (
+          <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest text-center">
+            {parsed.title}
+          </p>
+        )}
+        <div className="flex flex-col gap-2">
+          {(parsed.items || []).map((item, i) => (
+            <div key={i} className="flex items-start gap-3 bg-white border border-[#E4E7EC] rounded-xl p-4">
+              <div className="px-3 py-1.5 rounded-lg text-[12px] font-bold flex-shrink-0"
+                style={{ background: accentBg, color: accentColor }}>
+                {item.term}
+              </div>
+              <p className="text-[13px] text-[#475467] leading-[1.6] mt-0.5">{item.definition}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (parsed.type === 'compare') {
+    return (
+      <div className="flex flex-col gap-4">
+        {parsed.title && (
+          <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest text-center">
+            {parsed.title}
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white border-2 rounded-xl p-3 text-center" style={{ borderColor: accentColor }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: accentColor }}>Option A</p>
+          </div>
+          <div className="bg-white border-2 rounded-xl p-3 text-center" style={{ borderColor: '#70AD47' }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#70AD47' }}>Option B</p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          {(parsed.items || []).map((item, i) => (
+            <div key={i} className="grid grid-cols-2 gap-2">
+              <div className="bg-white border border-[#E4E7EC] rounded-xl p-3">
+                <p className="text-[13px] text-[#1E293B] leading-[1.5]">{item.left}</p>
+              </div>
+              <div className="bg-white border border-[#E4E7EC] rounded-xl p-3">
+                <p className="text-[13px] text-[#1E293B] leading-[1.5]">{item.right}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback — plain numbered list from level_3 text
+  return <GenericVisual text={parsed.toString()} />;
+}
 
 function GenericVisual({ text }) {
   const lines = (text || '').split('\n').filter(l => l.trim()).slice(0, 8);
@@ -372,7 +457,6 @@ export default function Lesson() {
   const [showAnswer, setShowAnswer] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [nextTopic, setNextTopic] = useState(null);
-  const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
 
   useEffect(() => {
     isMounted.current = true;
@@ -395,7 +479,6 @@ export default function Lesson() {
       const { data: lessonData } = await supabase
         .from('lessons').select('*').eq('topic_id', topicId).single();
 
-      // Null guard — topic or lesson not found
       if (!topicData || !lessonData) {
         if (isMounted.current) setNotFound(true);
         return;
@@ -428,7 +511,6 @@ export default function Lesson() {
             .gt('order_index', topicData.order_index)
             .order('order_index', { ascending: true })
             .limit(1);
-
           if (nextTopics && nextTopics.length > 0 && isMounted.current) {
             setNextTopic(nextTopics[0]);
           }
@@ -486,6 +568,9 @@ export default function Lesson() {
   };
 
   const handleVoice = () => {
+    // Read voice speed fresh each time
+    const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
+
     if (speaking) {
       window.speechSynthesis.cancel();
       setSpeaking(false);
@@ -590,6 +675,7 @@ export default function Lesson() {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
+      {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[760px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
           <button onClick={() => { window.speechSynthesis?.cancel(); navigate(-1); }}
@@ -616,8 +702,10 @@ export default function Lesson() {
         </div>
       </header>
 
+      {/* CONTENT */}
       <div className="flex-1 max-w-[760px] mx-auto w-full px-5 md:px-8 py-8 flex flex-col gap-6">
 
+        {/* COMPLETED BANNER */}
         {isCompleted && (
           <div className="fade bg-[#F0FDF4] border-2 border-[#70AD47] rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -644,6 +732,7 @@ export default function Lesson() {
           </div>
         )}
 
+        {/* TOPIC HEADER */}
         <div className="fade">
           <p className="text-[11px] font-bold uppercase tracking-widest mb-1" style={{ color }}>
             {topic?.subject} · {levelLabels[currentLevel].label}
@@ -652,6 +741,7 @@ export default function Lesson() {
           <p className="text-[13px] text-[#94A3B8] mt-1">{levelLabels[currentLevel].desc}</p>
         </div>
 
+        {/* LEVEL TABS */}
         <div className="flex items-center gap-2 flex-wrap">
           {[1,2,3,4].map(l => (
             <button key={l}
@@ -667,6 +757,7 @@ export default function Lesson() {
           ))}
         </div>
 
+        {/* LEVEL 1 */}
         {currentLevel === 1 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             <p className="text-[16px] md:text-[17px] text-[#1E293B] leading-[1.9] whitespace-pre-line">
@@ -675,6 +766,7 @@ export default function Lesson() {
           </div>
         )}
 
+        {/* LEVEL 2 */}
         {currentLevel === 2 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             <p className="text-[16px] md:text-[17px] text-[#1E293B] leading-[1.9] whitespace-pre-line">
@@ -683,12 +775,20 @@ export default function Lesson() {
           </div>
         )}
 
+        {/* LEVEL 3 — hardcoded for pre-built topics, dynamic for AI topics */}
         {currentLevel === 3 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
-            {hardcodedVisual ? hardcodedVisual : <GenericVisual text={lesson?.level_3}/>}
+            {hardcodedVisual ? (
+              hardcodedVisual
+            ) : lesson?.level_3_visual ? (
+              <DynamicVisual visualData={lesson.level_3_visual} color={color} />
+            ) : (
+              <GenericVisual text={lesson?.level_3} />
+            )}
           </div>
         )}
 
+        {/* LEVEL 4 */}
         {currentLevel === 4 && (
           <div className="fade bg-white border border-[#E4E7EC] rounded-2xl p-6 md:p-8">
             {quizQuestion ? (
@@ -753,6 +853,7 @@ export default function Lesson() {
           </div>
         )}
 
+        {/* ENCOURAGEMENT */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B] leading-[1.6]">
@@ -764,6 +865,7 @@ export default function Lesson() {
         </div>
       </div>
 
+      {/* BOTTOM BAR */}
       <div className="bg-white border-t border-[#E4E7EC] sticky bottom-0"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="max-w-[760px] mx-auto px-5 md:px-8 py-4 flex items-center justify-between gap-3">

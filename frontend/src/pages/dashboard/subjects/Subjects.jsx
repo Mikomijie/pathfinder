@@ -85,7 +85,10 @@ async function generateLesson(topicTitle, subject) {
 Create an adaptive lesson about: "${topicTitle}" for subject: "${subject}"
 
 Return ONLY this exact JSON, no markdown, no backticks, no extra text:
-{"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps, each under 15 words)","level_4":"Think about this: one reflective question to check understanding"}`;
+{"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps, each under 15 words)","level_4":"Think about this: one reflective question to check understanding","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point under 10 words"},{"label":"Step 2","text":"second key point under 10 words"},{"label":"Step 3","text":"third key point under 10 words"}]}}
+
+The level_3_visual type must be one of: "steps" (for processes), "compare" (for comparisons, returns items with "left" and "right" keys instead), "terms" (for key vocabulary, returns items with "term" and "definition" keys instead).
+Pick whichever type best fits the topic.`;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -105,7 +108,7 @@ Return ONLY this exact JSON, no markdown, no backticks, no extra text:
         { role: 'user', content: prompt }
       ],
       temperature: 0.2,
-      max_tokens: 800
+      max_tokens: 1000
     })
   });
 
@@ -177,7 +180,6 @@ export default function Subjects({ profile, onNavigate }) {
       progressData?.forEach(p => { map[p.topic_id] = p; });
       setProgress(map);
 
-      // Fetch subject progress
       const subMap = {};
       for (const s of subjectConfig) {
         const { data: topics } = await supabase
@@ -194,7 +196,6 @@ export default function Subjects({ profile, onNavigate }) {
       }
       setSubjectProgress(subMap);
 
-      // Fetch teacher materials for student's classes
       const { data: memberData } = await supabase
         .from('class_members')
         .select('class_id')
@@ -209,7 +210,6 @@ export default function Subjects({ profile, onNavigate }) {
           .order('created_at', { ascending: false });
         setTeacherMaterials(materials || []);
       }
-
     } catch (err) {
       console.error(err);
     } finally {
@@ -257,8 +257,8 @@ export default function Subjects({ profile, onNavigate }) {
       const q = query.toLowerCase();
       let subject = 'General Studies';
       if (q.includes('math') || q.includes('fraction') || q.includes('equation') ||
-        q.includes('algebra') || q.includes('geometry') || q.includes('number') ||
-        q.includes('calculus') || q.includes('trigonometry') || q.includes('statistic')) {
+        q.includes('algebra') || q.includes('geometry') || q.includes('calculus') ||
+        q.includes('trigonometry') || q.includes('statistic') || q.includes('number')) {
         subject = 'Mathematics';
       } else if (q.includes('english') || q.includes('grammar') || q.includes('essay') ||
         q.includes('comprehension') || q.includes('noun') || q.includes('verb') ||
@@ -293,6 +293,9 @@ export default function Subjects({ profile, onNavigate }) {
         level_2: lessonContent.level_2,
         level_3: lessonContent.level_3,
         level_4: lessonContent.level_4,
+        level_3_visual: lessonContent.level_3_visual
+          ? JSON.stringify(lessonContent.level_3_visual)
+          : null,
       });
 
       saveRecentSearch(query);
@@ -318,13 +321,6 @@ export default function Subjects({ profile, onNavigate }) {
     return map[subject] || '#5B9BD5';
   };
 
-  const getSubjectBg = (subject) => {
-    const map = { 'Mathematics': '#EFF6FF', 'English Language': '#F0FDF4', 'Basic Science': '#FFFBEB' };
-    return map[subject] || '#EFF6FF';
-  };
-
-
-
   return (
     <div className="flex flex-col gap-6">
       <style>{`
@@ -336,7 +332,6 @@ export default function Subjects({ profile, onNavigate }) {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
-      {/* HEADER */}
       <div className="f1">
         <h1 className="text-[24px] font-extrabold text-[#0F172A]">
           {isUniversity ? 'My Notes' : 'My Subjects'}
@@ -348,7 +343,7 @@ export default function Subjects({ profile, onNavigate }) {
         </p>
       </div>
 
-      {/* SEARCH BAR — shown for all students */}
+      {/* SEARCH BAR */}
       <div className="f2 relative z-10" ref={searchRef}>
         <div className={`flex items-center gap-3 bg-white border-2 rounded-2xl px-4 py-3.5 transition-all ${
           query.length > 0 ? 'border-[#5B9BD5] shadow-sm shadow-[#5B9BD5]/10' : 'border-[#E4E7EC]'
@@ -374,7 +369,7 @@ export default function Subjects({ profile, onNavigate }) {
           )}
         </div>
 
-        {/* SEARCH DROPDOWN */}
+        {/* DROPDOWN */}
         {showDropdown && (
           <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-[#E4E7EC] rounded-2xl shadow-xl z-50 overflow-hidden">
             {results.length > 0 ? (
@@ -387,12 +382,11 @@ export default function Subjects({ profile, onNavigate }) {
                 {results.map((topic, i) => {
                   const p = progress[topic.id];
                   const color = getSubjectColor(topic.subject);
-                  const bg = getSubjectBg(topic.subject);
                   return (
                     <button key={i} onClick={() => handleSelectTopic(topic)}
                       className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-[#F8FAFC] transition-colors border-b border-[#F1F5F9] last:border-0 text-left">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
-                        style={{ background: bg, color }}>
+                        style={{ background: `${color}20`, color }}>
                         {topic.subject?.[0] || '?'}
                       </div>
                       <div className="flex-1">
@@ -401,8 +395,7 @@ export default function Subjects({ profile, onNavigate }) {
                       </div>
                       {p?.completed
                         ? <span className="text-[#70AD47] flex-shrink-0">{Icons.check}</span>
-                        : <span className="text-[#94A3B8] flex-shrink-0">{Icons.arrow}</span>
-                      }
+                        : <span className="text-[#94A3B8] flex-shrink-0">{Icons.arrow}</span>}
                     </button>
                   );
                 })}
@@ -453,7 +446,7 @@ export default function Subjects({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* GENERATE ERROR */}
+        {/* ERROR */}
         {generateError && !generating && (
           <div className="mt-3 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl p-4 flex items-center gap-3">
             <button onClick={() => setGenerateError('')} className="text-[#BA1A1A] flex-shrink-0">{Icons.close}</button>
@@ -504,8 +497,7 @@ export default function Subjects({ profile, onNavigate }) {
           </div>
           <div className="flex flex-col gap-2">
             {teacherMaterials.map((m, i) => (
-              <div key={i}
-                className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+              <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-lg bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">
                   {Icons.file}
                 </div>
@@ -528,8 +520,8 @@ export default function Subjects({ profile, onNavigate }) {
             Or browse by subject
           </h2>
           {subjectLoading ? (
-            <>
-              <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
+            [1,2,3].map(i => (
+              <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-[#F1F5F9] flex-shrink-0"/>
                   <div>
@@ -540,36 +532,14 @@ export default function Subjects({ profile, onNavigate }) {
                 </div>
                 <div className="w-4 h-4 bg-[#F1F5F9] rounded"/>
               </div>
-              <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-[#F1F5F9] flex-shrink-0"/>
-                  <div>
-                    <div className="w-36 h-4 bg-[#F1F5F9] rounded mb-2"/>
-                    <div className="w-20 h-3 bg-[#F1F5F9] rounded mb-2"/>
-                    <div className="w-24 h-1.5 bg-[#F1F5F9] rounded-full"/>
-                  </div>
-                </div>
-                <div className="w-4 h-4 bg-[#F1F5F9] rounded"/>
-              </div>
-              <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-[#F1F5F9] flex-shrink-0"/>
-                  <div>
-                    <div className="w-28 h-4 bg-[#F1F5F9] rounded mb-2"/>
-                    <div className="w-20 h-3 bg-[#F1F5F9] rounded mb-2"/>
-                    <div className="w-20 h-1.5 bg-[#F1F5F9] rounded-full"/>
-                  </div>
-                </div>
-                <div className="w-4 h-4 bg-[#F1F5F9] rounded"/>
-              </div>
-            </>
+            ))
           ) : (
             subjectConfig.map((s) => {
               const sp = subjectProgress[s.key] || { done: 0, total: 3, progress: 0 };
               return (
                 <button key={s.key}
                   onClick={() => navigate(`/topics/${encodeURIComponent(s.key)}`)}
-                  className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left">
+                  className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left active:scale-[0.99]">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
                       style={{ background: s.bg, color: s.color }}>

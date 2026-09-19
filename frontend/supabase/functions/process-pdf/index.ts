@@ -1,14 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://pathfinder-chi-seven.vercel.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 async function extractTextFromPDF(base64: string): Promise<string> {
   try {
-    // Use unpdf for proper PDF text extraction
     const { extractText } = await import("npm:unpdf@0.11.0");
     const binaryStr = atob(base64);
     const bytes = new Uint8Array(binaryStr.length);
@@ -47,30 +46,58 @@ Return ONLY this raw JSON array, no markdown, no backticks, no extra text:
 [
   {
     "title": "lesson title max 8 words",
-    "level_1": "Simple clear explanation in 3-4 sentences. Plain language, no jargon.",
+    "level_1": "Simple clear explanation in 3-4 sentences. Plain language.",
     "level_2": "Same concept using a real-world Nigerian analogy. 3-4 sentences.",
-    "level_3": "Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps)",
-    "level_4": "Think about this: one reflective question about this content"
+    "level_3": "Step 1: ... Step 2: ... Step 3: ...",
+    "level_4": "Think about this: one reflective question about this content",
+    "level_3_visual": {
+      "type": "steps",
+      "title": "How it works",
+      "items": [
+        {"label": "Step 1", "text": "first key point under 10 words"},
+        {"label": "Step 2", "text": "second key point under 10 words"},
+        {"label": "Step 3", "text": "third key point under 10 words"}
+      ]
+    }
   },
   {
     "title": "lesson title max 8 words",
     "level_1": "Simple clear explanation in 3-4 sentences.",
     "level_2": "Real-world Nigerian analogy. 3-4 sentences.",
     "level_3": "Step 1: ... Step 2: ... Step 3: ...",
-    "level_4": "Think about this: one reflective question"
+    "level_4": "Think about this: one reflective question",
+    "level_3_visual": {
+      "type": "terms",
+      "title": "Key Concepts",
+      "items": [
+        {"term": "key term", "definition": "simple definition under 10 words"},
+        {"term": "key term", "definition": "simple definition under 10 words"},
+        {"term": "key term", "definition": "simple definition under 10 words"}
+      ]
+    }
   },
   {
     "title": "lesson title max 8 words",
     "level_1": "Simple clear explanation in 3-4 sentences.",
     "level_2": "Real-world Nigerian analogy. 3-4 sentences.",
     "level_3": "Step 1: ... Step 2: ... Step 3: ...",
-    "level_4": "Think about this: one reflective question"
+    "level_4": "Think about this: one reflective question",
+    "level_3_visual": {
+      "type": "compare",
+      "title": "Compare",
+      "items": [
+        {"left": "concept A point", "right": "concept B point"},
+        {"left": "concept A point", "right": "concept B point"},
+        {"left": "concept A point", "right": "concept B point"}
+      ]
+    }
   }
 ]
 
 Rules:
 - Return ONLY the JSON array
 - Each lesson covers a different part of the content
+- Choose the level_3_visual type that best fits each lesson: "steps" for processes, "terms" for vocabulary, "compare" for comparisons
 - Keep language simple and encouraging
 - Appropriate for ${gradeLevel} students`;
 
@@ -92,7 +119,7 @@ Rules:
         { role: 'user', content: prompt }
       ],
       temperature: 0.2,
-      max_tokens: 3000,
+      max_tokens: 4000,
     })
   });
 
@@ -105,14 +132,12 @@ Rules:
   let content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty response from AI. Please try again.');
 
-  // Clean markdown wrapping
   content = content
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
 
-  // Extract JSON array
   const arrayMatch = content.match(/\[[\s\S]*\]/);
   if (!arrayMatch) throw new Error('Could not parse AI response. Please try again.');
 
@@ -166,6 +191,9 @@ async function saveLesson(
         level_2: lesson.level_2 || 'Think of this like a journey through the material.',
         level_3: lesson.level_3 || 'Step 1: Read. Step 2: Understand. Step 3: Review.',
         level_4: lesson.level_4 || 'Think about this: What is the most important idea from this section?',
+        level_3_visual: lesson.level_3_visual
+          ? JSON.stringify(lesson.level_3_visual)
+          : null,
       })
     });
 
@@ -189,6 +217,15 @@ serve(async (req) => {
   }
 
   try {
+    // Verify Authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
     const body = await req.json();
     const { pdfBase64, pasteText, topicTitle, studentId, gradeLevel } = body;
 
@@ -216,6 +253,29 @@ serve(async (req) => {
       );
     }
 
+    // Verify the user is actually authenticated
+    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        'Authorization': authHeader,
+        'apikey': Deno.env.get('SUPABASE_ANON_KEY') || supabaseKey,
+      }
+    });
+
+    if (!userRes.ok) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid session. Please log in again.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
+    const userData = await userRes.json();
+    if (!userData?.id || userData.id !== studentId) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized. Student ID mismatch.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      );
+    }
+
     // Extract text
     let extractedText: string;
     if (pasteText) {
@@ -239,7 +299,7 @@ serve(async (req) => {
 
     const title = (topicTitle || 'My Notes').trim();
 
-    // Generate ALL lessons in ONE AI call — fixes timeout issue
+    // Generate all lessons in one AI call
     let lessons: any[];
     try {
       lessons = await generateAllLessons(extractedText, title, gradeLevel || 'University');
@@ -257,7 +317,7 @@ serve(async (req) => {
       );
     }
 
-    // Save all lessons to Supabase
+    // Save all lessons
     const savedLessons = [];
     for (let i = 0; i < lessons.length; i++) {
       const saved = await saveLesson(

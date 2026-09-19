@@ -85,11 +85,18 @@ const Icons = {
       <line x1="6" y1="6" x2="18" y2="18"/>
     </svg>
   ),
+  refresh: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="23 4 23 10 17 10"/>
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+    </svg>
+  ),
 };
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
+  const [profileError, setProfileError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeNav, setActiveNav] = useState('home');
   const [focusMode, setFocusMode] = useState(false);
@@ -103,14 +110,19 @@ export default function StudentDashboard() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate('/login'); return; }
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single();
-      setProfile(data);
+      if (error || !data) {
+        setProfileError(true);
+      } else {
+        setProfile(data);
+      }
     } catch (err) {
       console.error(err);
+      setProfileError(true);
     } finally {
       setLoading(false);
     }
@@ -138,7 +150,7 @@ export default function StudentDashboard() {
   const renderContent = () => {
     switch (activeNav) {
       case 'home': return <Home profile={profile} onNavigate={setActiveNav} />;
-      case 'subjects': return <Subjects profile={profile} />;
+      case 'subjects': return <Subjects profile={profile} onNavigate={setActiveNav} />;
       case 'flashcards': return <FlashcardsHome profile={profile} />;
       case 'upload': return <PDFUpload profile={profile} />;
       case 'skills': return <SkillsHub />;
@@ -158,10 +170,51 @@ export default function StudentDashboard() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+          * { font-family: 'Plus Jakarta Sans', sans-serif; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
         <div className="flex flex-col items-center gap-3">
           {Icons.logo}
           <p className="text-[14px] text-[#475467]">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Profile error state — friendly recovery
+  if (profileError) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center px-6">
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+          * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        `}</style>
+        <div className="text-center max-w-[380px]">
+          <div className="w-16 h-16 rounded-2xl bg-[#FFF1F1] flex items-center justify-center mx-auto mb-5">
+            <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-[#BA1A1A]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <h2 className="text-[20px] font-extrabold text-[#0F172A] mb-2">Could not load your profile</h2>
+          <p className="text-[14px] text-[#475467] leading-[1.7] mb-6">
+            There was a problem loading your account. This can happen if your profile is still being set up. Please try again.
+          </p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => { setProfileError(false); setLoading(true); fetchProfile(); }}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[14px] font-bold rounded-xl transition-colors">
+              {Icons.refresh} Try Again
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-6 py-3 bg-white border border-[#E4E7EC] hover:border-[#136299] text-[#475467] text-[14px] font-semibold rounded-xl transition-colors">
+              Log Out
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -214,15 +267,13 @@ export default function StudentDashboard() {
           <div className="px-3 py-4 border-t border-[#E4E7EC] flex flex-col gap-1">
             <button
               onClick={() => setFocusMode(true)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#475467] hover:bg-[#F8FAFC] transition-all w-full text-left"
-            >
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#475467] hover:bg-[#F8FAFC] transition-all w-full text-left">
               <span className="text-[#94A3B8]">{Icons.focus}</span>
               Focus Mode
             </button>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#BA1A1A] hover:bg-[#FFF1F1] transition-all w-full text-left"
-            >
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#BA1A1A] hover:bg-[#FFF1F1] transition-all w-full text-left">
               {Icons.logout} Log Out
             </button>
           </div>
@@ -238,7 +289,7 @@ export default function StudentDashboard() {
                 {Icons.menu}
               </button>
             )}
-            <p className="text-[13px] text-[#94A3B8]">
+            <p className="text-[13px] text-[#94A3B8] truncate max-w-[160px] md:max-w-none">
               {profile?.grade_level && `${profile.grade_level} · `}{profile?.school_name || 'Pathfinder'}
             </p>
           </div>
@@ -246,13 +297,12 @@ export default function StudentDashboard() {
             {focusMode && (
               <button
                 onClick={() => setFocusMode(false)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F8FAFC] border border-[#E4E7EC] rounded-lg text-[13px] font-medium text-[#475467] hover:border-[#5B9BD5] transition-colors"
-              >
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F8FAFC] border border-[#E4E7EC] rounded-lg text-[13px] font-medium text-[#475467] hover:border-[#5B9BD5] transition-colors">
                 {Icons.close} Exit Focus
               </button>
             )}
             <div className="w-8 h-8 rounded-full bg-[#136299] flex items-center justify-center text-white text-[13px] font-bold">
-              {profile?.full_name?.[0]?.toUpperCase()}
+              {profile?.full_name?.[0]?.toUpperCase() || '?'}
             </div>
           </div>
         </header>
@@ -267,28 +317,41 @@ export default function StudentDashboard() {
 
 function Settings({ profile, focusMode, setFocusMode, onLogout }) {
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
+  const [voiceSpeed, setVoiceSpeedState] = useState(
+    parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75')
+  );
+
+  const handleVoiceSpeed = (speed) => {
+    setVoiceSpeedState(speed);
+    localStorage.setItem('pathfinder_voice_speed', speed.toString());
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-[24px] font-extrabold text-[#0F172A]">Settings</h1>
         <p className="text-[14px] text-[#475467] mt-1">Manage your account and preferences.</p>
       </div>
+
       <div className="bg-white border border-[#E4E7EC] rounded-2xl p-6 flex flex-col gap-5">
         <h2 className="text-[15px] font-bold text-[#0F172A]">Profile</h2>
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-full bg-[#136299] flex items-center justify-center text-white text-[20px] font-bold">
+          <div className="w-14 h-14 rounded-full bg-[#136299] flex items-center justify-center text-white text-[20px] font-bold flex-shrink-0">
             {firstName[0]?.toUpperCase()}
           </div>
-          <div>
-            <p className="text-[16px] font-bold text-[#0F172A]">{profile?.full_name}</p>
-            <p className="text-[13px] text-[#94A3B8]">{profile?.email}</p>
+          <div className="min-w-0">
+            <p className="text-[16px] font-bold text-[#0F172A] truncate">{profile?.full_name}</p>
+            <p className="text-[13px] text-[#94A3B8] truncate">{profile?.email}</p>
             <p className="text-[13px] text-[#94A3B8]">
               {profile?.grade_level} · {profile?.school_name || 'No school set'}
             </p>
           </div>
         </div>
+
         <div className="pt-4 border-t border-[#F1F5F9]">
-          <h3 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest mb-3">Accessibility</h3>
+          <h3 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Accessibility</h3>
+
+          {/* Focus Mode */}
           <div className="flex items-center justify-between py-3 border-b border-[#F1F5F9]">
             <div>
               <p className="text-[14px] font-semibold text-[#1E293B]">Focus Mode</p>
@@ -296,16 +359,40 @@ function Settings({ profile, focusMode, setFocusMode, onLogout }) {
             </div>
             <button
               onClick={() => setFocusMode(!focusMode)}
-              className={`w-11 h-6 rounded-full transition-colors relative ${focusMode ? 'bg-[#136299]' : 'bg-[#E4E7EC]'}`}
-            >
+              className={`w-11 h-6 rounded-full transition-colors relative ${focusMode ? 'bg-[#136299]' : 'bg-[#E4E7EC]'}`}>
               <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${focusMode ? 'left-6' : 'left-1'}`}/>
             </button>
           </div>
+
+          {/* Voice Speed */}
+          <div className="flex items-center justify-between py-3">
+            <div>
+              <p className="text-[14px] font-semibold text-[#1E293B]">Voice Speed</p>
+              <p className="text-[12px] text-[#94A3B8]">How fast lessons are read aloud</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {[
+                { label: 'Slow', value: 0.5 },
+                { label: 'Normal', value: 0.75 },
+                { label: 'Fast', value: 1 },
+              ].map(s => (
+                <button key={s.value}
+                  onClick={() => handleVoiceSpeed(s.value)}
+                  className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all border ${
+                    voiceSpeed === s.value
+                      ? 'bg-[#136299] text-white border-[#136299]'
+                      : 'bg-white text-[#475467] border-[#E4E7EC] hover:border-[#136299]'
+                  }`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
+
         <button
           onClick={onLogout}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#FFF1F1] text-[#BA1A1A] text-[14px] font-semibold rounded-xl hover:bg-[#FFE4E4] transition-colors w-fit mt-2"
-        >
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#FFF1F1] text-[#BA1A1A] text-[14px] font-semibold rounded-xl hover:bg-[#FFE4E4] transition-colors w-fit mt-2">
           <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
             <polyline points="16 17 21 12 16 7"/>

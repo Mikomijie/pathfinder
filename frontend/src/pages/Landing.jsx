@@ -498,14 +498,6 @@ export default function Landing() {
                 ))}
               </ul>
             </div>
-            <div>
-              <h4 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Contact</h4>
-              <ul className="flex flex-col gap-3">
-                <li><a href="mailto:hello@pathfinder.ng" className="text-[14px] text-[#475467] hover:text-white transition-colors">hello@pathfinder.ng</a></li>
-                <li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">Twitter / X</button></li>
-<li><button className="text-[14px] text-[#475467] hover:text-white transition-colors">LinkedIn</button></li>
-              </ul>
-            </div>
           </div>
           <div className="mt-8 pt-6 border-t border-[#1E293B] flex flex-col md:flex-row items-center justify-between gap-2">
             <p className="text-[12px] text-[#334155]">© 2026 PATHFINDER. All rights reserved.</p>
