@@ -59,11 +59,12 @@ function extractJSON(text, arrayMode = false) {
 }
 
 export async function generateInteractiveQuestion(topicTitle, lessonText) {
-  if (!topicTitle || !lessonText) return null;
+  const title = topicTitle || 'This topic';
+  const text = lessonText || 'Explain the key concepts of this topic.';
 
   try {
-    const prompt = `Generate ONE multiple choice question to check understanding of: "${topicTitle}"
-Based on this lesson: "${(lessonText || '').slice(0, 600)}"
+    const prompt = `Generate ONE multiple choice question to check understanding of: "${title}"
+Based on this lesson: "${text.slice(0, 600)}"
 
 Return ONLY this JSON object:
 {"question":"your question here","options":["Option A","Option B","Option C","Option D"],"answer":0,"explanation":"brief encouraging explanation of why the answer is correct"}
@@ -74,8 +75,8 @@ Rules:
 - No time pressure implied in the question
 - Make distractors (wrong answers) plausible but clearly wrong`;
 
-    const text = await callOpenRouter(prompt, 300);
-    return extractJSON(text, false);
+    const content = await callOpenRouter(prompt, 300);
+    return extractJSON(content, false);
   } catch (err) {
     console.error('generateInteractiveQuestion error:', err.message);
     return null;
@@ -83,11 +84,12 @@ Rules:
 }
 
 export async function generateQuiz(topicTitle, lessonText) {
-  if (!topicTitle) return null;
+  const title = topicTitle || 'This topic';
+  const text = lessonText || 'Explain the key concepts of this topic clearly and simply.';
 
   try {
-    const prompt = `Generate exactly 3 multiple choice questions about: "${topicTitle}"
-Based on: "${(lessonText || '').slice(0, 600)}"
+    const prompt = `Generate exactly 3 multiple choice questions about: "${title}"
+Based on: "${text.slice(0, 600)}"
 
 Return ONLY this JSON array:
 [
@@ -101,8 +103,8 @@ Rules:
 - Each question tests a different part of the lesson
 - Keep language simple and encouraging`;
 
-    const text = await callOpenRouter(prompt, 600);
-    return extractJSON(text, true);
+    const content = await callOpenRouter(prompt, 600);
+    return extractJSON(content, true);
   } catch (err) {
     console.error('generateQuiz error:', err.message);
     return null;
@@ -110,11 +112,12 @@ Rules:
 }
 
 export async function generateFlashcards(topicTitle, lessonText) {
-  if (!topicTitle) return null;
+  const title = topicTitle || 'This topic';
+  const text = lessonText || 'Key concepts from this topic.';
 
   try {
-    const prompt = `Extract 5 key concept pairs from this lesson about: "${topicTitle}"
-Content: "${(lessonText || '').slice(0, 600)}"
+    const prompt = `Extract 5 key concept pairs from this lesson about: "${title}"
+Content: "${text.slice(0, 600)}"
 
 Return ONLY this JSON array:
 [
@@ -131,8 +134,8 @@ Rules:
 - Simple Nigerian English
 - Focus on most important concepts`;
 
-    const text = await callOpenRouter(prompt, 500);
-    return extractJSON(text, true);
+    const content = await callOpenRouter(prompt, 500);
+    return extractJSON(content, true);
   } catch (err) {
     console.error('generateFlashcards error:', err.message);
     return null;
@@ -140,11 +143,12 @@ Rules:
 }
 
 export async function generateLessonFromText(topicTitle, subject, contentText) {
-  if (!topicTitle || !contentText) return null;
+  const title = topicTitle || 'This topic';
+  const text = contentText || '';
 
   try {
-    const prompt = `Create a complete adaptive lesson about: "${topicTitle}" for subject: "${subject}"
-Based on this content: "${contentText.slice(0, 2000)}"
+    const prompt = `Create a complete adaptive lesson about: "${title}" for subject: "${subject}"
+Based on this content: "${text.slice(0, 2000)}"
 
 Return ONLY this JSON object:
 {"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps)","level_4":"Think about this: one reflective question to check understanding","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point under 10 words"},{"label":"Step 2","text":"second key point under 10 words"},{"label":"Step 3","text":"third key point under 10 words"}]}}
@@ -157,8 +161,8 @@ The level_3_visual type must be one of:
 Pick the type that best fits the topic content.
 Keep all levels appropriate for the student. Use simple, encouraging language.`;
 
-    const text = await callOpenRouter(prompt, 1000);
-    return extractJSON(text, false);
+    const content = await callOpenRouter(prompt, 1000);
+    return extractJSON(content, false);
   } catch (err) {
     console.error('generateLessonFromText error:', err.message);
     return null;
