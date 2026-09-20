@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 
@@ -91,6 +91,21 @@ const Icons = {
       <line x1="6" y1="6" x2="18" y2="18"/>
     </svg>
   ),
+  pdf: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="16" y1="13" x2="8" y2="13"/>
+      <line x1="16" y1="17" x2="8" y2="17"/>
+      <polyline points="10 9 9 9 8 9"/>
+    </svg>
+  ),
+  paste: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+    </svg>
+  ),
 };
 
 const generateCode = () => {
@@ -104,6 +119,8 @@ const generateCode = () => {
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
+
   const [profile, setProfile] = useState(null);
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
@@ -115,13 +132,20 @@ export default function TeacherDashboard() {
   const [copied, setCopied] = useState(false);
   const [showNewClass, setShowNewClass] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
-  const [uploadForm, setUploadForm] = useState({ title: '', description: '', class_id: '' });
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [newClassForm, setNewClassForm] = useState({ name: '', subject: '', level: '' });
   const [creatingClass, setCreatingClass] = useState(false);
   const [classError, setClassError] = useState('');
+
+  // Upload state
+  const [uploadMode, setUploadMode] = useState('pdf'); // 'pdf' or 'paste'
+  const [uploadClassId, setUploadClassId] = useState('');
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadFile, setUploadFile] = useState(null);
+  const [pasteText, setPasteText] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [uploadStep, setUploadStep] = useState('');
 
   const fetchAll = useCallback(async () => {
     try {
@@ -177,28 +201,94 @@ export default function TeacherDashboard() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setUploadError('Please select a PDF file.');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setUploadError('File is too large. Please upload a PDF under 15MB.');
+      return;
+    }
+    setUploadFile(file);
+    setUploadError('');
+    if (!uploadTitle) setUploadTitle(file.name.replace('.pdf', ''));
+  };
+
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!uploadForm.title || !uploadForm.class_id) return;
+    if (!uploadClassId) { setUploadError('Please select a class.'); return; }
+    if (!uploadTitle.trim()) { setUploadError('Please enter a title.'); return; }
+    if (uploadMode === 'pdf' && !uploadFile) { setUploadError('Please select a PDF file.'); return; }
+    if (uploadMode === 'paste' && !pasteText.trim()) { setUploadError('Please paste your notes.'); return; }
+
     setUploading(true);
     setUploadError('');
-    setUploadSuccess(false);
+    setUploadSuccess('');
+
     try {
-      const { error } = await supabase.from('class_materials').insert({
-        class_id: uploadForm.class_id,
-        title: uploadForm.title,
-        description: uploadForm.description,
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // Get class level for context
+      const selectedClassData = classes.find(c => c.id === uploadClassId);
+      const gradeLevel = selectedClassData?.level || 'Secondary';
+
+      let payload = {
+        topicTitle: uploadTitle.trim(),
+        classId: uploadClassId,
+        gradeLevel,
+      };
+
+      if (uploadMode === 'pdf') {
+        setUploadStep('Reading PDF...');
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            resolve(reader.result.split(',')[1]);
+          };
+          reader.onerror = () => reject(new Error('Could not read file'));
+          reader.readAsDataURL(uploadFile);
+        });
+        payload.pdfBase64 = base64;
+      } else {
+        payload.pasteText = pasteText.trim();
+      }
+
+      setUploadStep('AI is creating lessons from your content...');
+
+      const { data, error } = await supabase.functions.invoke('process-pdf', {
+        body: payload,
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+        },
       });
+
       if (error) throw error;
-      setUploadForm({ title: '', description: '', class_id: '' });
-      setUploadSuccess(true);
+      if (!data?.success) throw new Error(data?.error || 'Upload failed');
+
+      // Also save to class_materials for reference
+      await supabase.from('class_materials').insert({
+        class_id: uploadClassId,
+        title: uploadTitle.trim(),
+        description: `${data.totalParts} lesson${data.totalParts !== 1 ? 's' : ''} created from uploaded content`,
+      });
+
+      setUploadSuccess(`${data.message}. Students in this class can now study them.`);
+      setUploadTitle('');
+      setUploadFile(null);
+      setPasteText('');
+      setUploadClassId('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       fetchAll();
-      setTimeout(() => setUploadSuccess(false), 3000);
     } catch (err) {
       console.error(err);
-      setUploadError('Could not upload material. Please try again.');
+      setUploadError(err.message || 'Upload failed. Please try again.');
     } finally {
       setUploading(false);
+      setUploadStep('');
     }
   };
 
@@ -207,7 +297,8 @@ export default function TeacherDashboard() {
     setCreatingClass(true);
     setClassError('');
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // eslint-disable-next-line no-unused-vars
+const { data: { user } } = await supabase.auth.getUser();
       const code = generateCode();
       const { error } = await supabase.from('classes').insert({
         teacher_id: user.id,
@@ -280,15 +371,14 @@ export default function TeacherDashboard() {
         .f2 { animation: fadeUp 0.4s 0.08s ease both; }
         .f3 { animation: fadeUp 0.4s 0.16s ease both; }
         .f4 { animation: fadeUp 0.4s 0.24s ease both; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
-      {/* SIDEBAR OVERLAY */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden"
           onClick={() => setSidebarOpen(false)}/>
       )}
 
-      {/* SIDEBAR */}
       <aside className={`
         fixed md:sticky top-0 left-0 h-screen w-[240px] bg-white border-r border-[#E4E7EC]
         flex flex-col z-40 transition-transform duration-300
@@ -331,7 +421,6 @@ export default function TeacherDashboard() {
         </div>
       </aside>
 
-      {/* MAIN */}
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
         <header className="h-[60px] bg-white border-b border-[#E4E7EC] flex items-center justify-between px-4 md:px-8 sticky top-0 z-20 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -423,7 +512,7 @@ export default function TeacherDashboard() {
                       {Icons.upload}
                     </div>
                     <p className="text-[14px] font-semibold text-[#0F172A]">No materials uploaded yet</p>
-                    <p className="text-[13px] text-[#94A3B8] mt-1">Upload your first material for students to access.</p>
+                    <p className="text-[13px] text-[#94A3B8] mt-1">Upload your first PDF for students to study.</p>
                     <button onClick={() => setActiveNav('upload')}
                       className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors mx-auto">
                       Upload Material {Icons.arrow}
@@ -550,7 +639,9 @@ export default function TeacherDashboard() {
             <div className="flex flex-col gap-5">
               <div className="f1">
                 <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Upload Materials</h1>
-                <p className="text-[14px] text-[#475467] mt-1">Upload notes or topics for your students.</p>
+                <p className="text-[14px] text-[#475467] mt-1">
+                  Upload a PDF or paste notes. Pathfinder turns them into adaptive lessons for your students.
+                </p>
               </div>
 
               {uploadError && (
@@ -561,48 +652,155 @@ export default function TeacherDashboard() {
 
               {uploadSuccess && (
                 <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl text-[13px] text-[#336b07] font-medium flex items-center gap-2">
-                  {Icons.check} Material uploaded successfully. Students can now see it.
+                  {Icons.check} {uploadSuccess}
                 </div>
               )}
 
               <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-8">
-                <form onSubmit={handleUpload} className="flex flex-col gap-4">
+                <form onSubmit={handleUpload} className="flex flex-col gap-5">
+
+                  {/* Class selector */}
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Select Class</label>
-                    <select required value={uploadForm.class_id}
-                      onChange={e => setUploadForm({ ...uploadForm, class_id: e.target.value })}
+                    <select required value={uploadClassId}
+                      onChange={e => setUploadClassId(e.target.value)}
                       className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#70AD47] transition-all appearance-none">
                       <option value="">Choose a class</option>
                       {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
+
+                  {/* Title */}
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Material Title</label>
-                    <input type="text" required placeholder="e.g. Chapter 3: Fractions"
-                      value={uploadForm.title}
-                      onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })}
+                    <input type="text" required placeholder="e.g. Chapter 3: Fractions, Week 5 Notes"
+                      value={uploadTitle}
+                      onChange={e => setUploadTitle(e.target.value)}
                       className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all"/>
                   </div>
+
+                  {/* Mode toggle */}
                   <div>
-                    <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
-                      Description <span className="text-[#94A3B8] font-normal">(optional)</span>
-                    </label>
-                    <textarea rows={3} placeholder="What does this material cover?"
-                      value={uploadForm.description}
-                      onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all resize-none"/>
+                    <label className="text-[13px] font-semibold text-[#1E293B] block mb-2">Upload Method</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button type="button"
+                        onClick={() => { setUploadMode('pdf'); setUploadError(''); }}
+                        className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
+                          uploadMode === 'pdf'
+                            ? 'border-[#336b07] bg-[#F0FDF4]'
+                            : 'border-[#E4E7EC] bg-white hover:border-[#70AD47]/50'
+                        }`}>
+                        <div className={uploadMode === 'pdf' ? 'text-[#336b07]' : 'text-[#94A3B8]'}>
+                          {Icons.pdf}
+                        </div>
+                        <div>
+                          <p className="text-[13px] font-bold text-[#0F172A]">Upload PDF</p>
+                          <p className="text-[11px] text-[#94A3B8]">Upload a PDF file</p>
+                        </div>
+                      </button>
+                      <button type="button"
+                        onClick={() => { setUploadMode('paste'); setUploadError(''); }}
+                        className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
+                          uploadMode === 'paste'
+                            ? 'border-[#336b07] bg-[#F0FDF4]'
+                            : 'border-[#E4E7EC] bg-white hover:border-[#70AD47]/50'
+                        }`}>
+                        <div className={uploadMode === 'paste' ? 'text-[#336b07]' : 'text-[#94A3B8]'}>
+                          {Icons.paste}
+                        </div>
+                        <div>
+                          <p className="text-[13px] font-bold text-[#0F172A]">Paste Notes</p>
+                          <p className="text-[11px] text-[#94A3B8]">Type or paste text</p>
+                        </div>
+                      </button>
+                    </div>
                   </div>
+
+                  {/* PDF upload */}
+                  {uploadMode === 'pdf' && (
+                    <div>
+                      <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
+                        PDF File <span className="text-[#94A3B8] font-normal">(max 15MB)</span>
+                      </label>
+                      <div className="relative border-2 border-dashed border-[#E4E7EC] rounded-xl overflow-hidden hover:border-[#70AD47] transition-colors">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          onChange={handleFileChange}
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            opacity: 0,
+                            width: '100%',
+                            height: '100%',
+                            cursor: 'pointer',
+                          }}
+                        />
+                        <div className="p-6 flex flex-col items-center gap-3 pointer-events-none">
+                          <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07]">
+                            {Icons.pdf}
+                          </div>
+                          {uploadFile ? (
+                            <div className="text-center">
+                              <p className="text-[14px] font-semibold text-[#0F172A]">{uploadFile.name}</p>
+                              <p className="text-[12px] text-[#94A3B8] mt-0.5">
+                                {(uploadFile.size / 1024 / 1024).toFixed(1)} MB — tap to change
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="text-center">
+                              <p className="text-[14px] font-semibold text-[#0F172A]">Tap to select PDF</p>
+                              <p className="text-[12px] text-[#94A3B8] mt-0.5">Lecture notes, textbook chapters, handouts</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Paste mode */}
+                  {uploadMode === 'paste' && (
+                    <div>
+                      <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Your Notes</label>
+                      <textarea
+                        rows={8}
+                        placeholder="Paste your lesson notes, textbook content, or any teaching material here..."
+                        value={pasteText}
+                        onChange={e => setPasteText(e.target.value)}
+                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all resize-none"
+                      />
+                      <p className="text-[11px] text-[#94A3B8] mt-1.5">
+                        {pasteText.split(/\s+/).filter(w => w).length} words
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Info box */}
                   <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
                     <p className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest mb-1">What happens after upload</p>
                     <p className="text-[13px] text-[#1E293B] leading-[1.6]">
-                      Students in this class will see your material in their Subjects page under "From Your Teacher".
+                      Pathfinder AI reads your content, detects natural topic breaks, and creates adaptive lessons — one per section. Students in this class can study them immediately with voice support, visual diagrams, and quizzes.
                     </p>
                   </div>
-                  <button type="submit"
-                    disabled={uploading || !uploadForm.title || !uploadForm.class_id}
-                    className="w-full py-3.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors">
-                    {uploading ? 'Uploading...' : 'Upload Material'}
-                  </button>
+
+                  {/* Upload button */}
+                  {uploading ? (
+                    <div className="w-full py-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl flex items-center justify-center gap-3">
+                      <div className="w-5 h-5 rounded-full border-2 border-[#BBF7D0]"
+                        style={{ borderTopColor: '#336b07', animation: 'spin 1s linear infinite' }}/>
+                      <p className="text-[14px] font-semibold text-[#336b07]">
+                        {uploadStep || 'Processing...'}
+                      </p>
+                    </div>
+                  ) : (
+                    <button type="submit"
+                      disabled={!uploadClassId || !uploadTitle.trim() || (uploadMode === 'pdf' && !uploadFile) || (uploadMode === 'paste' && !pasteText.trim())}
+                      className="w-full py-3.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[15px] font-bold rounded-xl transition-colors">
+                      Create Lessons for Students
+                    </button>
+                  )}
+
                 </form>
               </div>
             </div>

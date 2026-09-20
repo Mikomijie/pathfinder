@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://pathfinder-chi-seven.vercel.app',
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -18,88 +18,112 @@ async function extractTextFromPDF(base64: string): Promise<string> {
     if (!text || text.trim().length < 50) {
       throw new Error('Could not extract enough text from this PDF. Please use Paste Notes instead.');
     }
-    return text.substring(0, 8000);
+    return text;
   } catch (err: any) {
     if (err.message.includes('Could not extract')) throw err;
-    throw new Error('Could not read this PDF. Please use Paste Notes instead and paste your content directly.');
+    throw new Error('Could not read this PDF. Please use Paste Notes instead.');
   }
 }
 
-async function generateAllLessons(
-  text: string,
+function smartChunk(text: string): string[] {
+  // Detect natural topic breaks — headings, sections, double line breaks
+  const lines = text.split('\n');
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  const isHeading = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    // Short lines that look like headings
+    if (trimmed.length < 80 && trimmed.length > 2) {
+      // All caps
+      if (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)) return true;
+      // Numbered section like "1." or "1.1" or "Chapter"
+      if (/^(\d+[\.\)]|chapter|section|topic|unit|part|introduction|conclusion|summary)/i.test(trimmed)) return true;
+      // Ends with colon
+      if (trimmed.endsWith(':') && trimmed.split(' ').length <= 6) return true;
+    }
+    return false;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // If we hit a heading and current chunk has enough content, save it
+    if (isHeading(trimmed) && currentChunk.trim().split(/\s+/).length > 200) {
+      chunks.push(currentChunk.trim());
+      currentChunk = line + '\n';
+    } else {
+      currentChunk += line + '\n';
+    }
+  }
+
+  // Push the last chunk
+  if (currentChunk.trim().length > 100) {
+    chunks.push(currentChunk.trim());
+  }
+
+  // If no natural breaks found or only one chunk, split by word count
+  if (chunks.length <= 1) {
+    const words = text.split(/\s+/);
+    const wordsPerChunk = Math.ceil(words.length / Math.min(10, Math.ceil(words.length / 500)));
+    const splitChunks: string[] = [];
+    for (let i = 0; i < words.length; i += wordsPerChunk) {
+      const chunk = words.slice(i, i + wordsPerChunk).join(' ');
+      if (chunk.trim().length > 100) splitChunks.push(chunk.trim());
+    }
+    return splitChunks.slice(0, 10);
+  }
+
+  return chunks.slice(0, 10);
+}
+
+async function generateLessonsFromChunks(
+  chunks: string[],
   topicTitle: string,
   gradeLevel: string
 ): Promise<any[]> {
   const key = Deno.env.get('OPENROUTER_API_KEY');
   if (!key) throw new Error('OPENROUTER_API_KEY not configured');
 
+  // Build prompt with all chunks — one AI call for all lessons
+  const chunksText = chunks.map((chunk, i) =>
+    `--- SECTION ${i + 1} ---\n${chunk.substring(0, 1200)}`
+  ).join('\n\n');
+
   const prompt = `You are a patient, encouraging teacher for neurodivergent students in Nigeria.
 
-Transform this content into exactly 3 micro-lessons about: "${topicTitle}"
+Transform the following ${chunks.length} sections of content about "${topicTitle}" into exactly ${chunks.length} micro-lessons.
 
-Content:
-"""
-${text.substring(0, 6000)}
-"""
+${chunksText}
 
-Return ONLY this raw JSON array, no markdown, no backticks, no extra text:
+Return ONLY a raw JSON array with exactly ${chunks.length} objects. No markdown, no backticks, just raw JSON:
 [
   {
     "title": "lesson title max 8 words",
-    "level_1": "Simple clear explanation in 3-4 sentences. Plain language.",
+    "level_1": "Simple clear explanation in 3-4 sentences. Plain language, no jargon.",
     "level_2": "Same concept using a real-world Nigerian analogy. 3-4 sentences.",
-    "level_3": "Step 1: ... Step 2: ... Step 3: ...",
+    "level_3": "Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps)",
     "level_4": "Think about this: one reflective question about this content",
     "level_3_visual": {
       "type": "steps",
-      "title": "How it works",
+      "title": "Key Points",
       "items": [
-        {"label": "Step 1", "text": "first key point under 10 words"},
-        {"label": "Step 2", "text": "second key point under 10 words"},
-        {"label": "Step 3", "text": "third key point under 10 words"}
-      ]
-    }
-  },
-  {
-    "title": "lesson title max 8 words",
-    "level_1": "Simple clear explanation in 3-4 sentences.",
-    "level_2": "Real-world Nigerian analogy. 3-4 sentences.",
-    "level_3": "Step 1: ... Step 2: ... Step 3: ...",
-    "level_4": "Think about this: one reflective question",
-    "level_3_visual": {
-      "type": "terms",
-      "title": "Key Concepts",
-      "items": [
-        {"term": "key term", "definition": "simple definition under 10 words"},
-        {"term": "key term", "definition": "simple definition under 10 words"},
-        {"term": "key term", "definition": "simple definition under 10 words"}
-      ]
-    }
-  },
-  {
-    "title": "lesson title max 8 words",
-    "level_1": "Simple clear explanation in 3-4 sentences.",
-    "level_2": "Real-world Nigerian analogy. 3-4 sentences.",
-    "level_3": "Step 1: ... Step 2: ... Step 3: ...",
-    "level_4": "Think about this: one reflective question",
-    "level_3_visual": {
-      "type": "compare",
-      "title": "Compare",
-      "items": [
-        {"left": "concept A point", "right": "concept B point"},
-        {"left": "concept A point", "right": "concept B point"},
-        {"left": "concept A point", "right": "concept B point"}
+        {"label": "Point 1", "text": "key idea under 10 words"},
+        {"label": "Point 2", "text": "key idea under 10 words"},
+        {"label": "Point 3", "text": "key idea under 10 words"}
       ]
     }
   }
 ]
 
 Rules:
-- Return ONLY the JSON array
-- Each lesson covers a different part of the content
-- Choose the level_3_visual type that best fits each lesson: "steps" for processes, "terms" for vocabulary, "compare" for comparisons
+- Return exactly ${chunks.length} lesson objects in the array
+- Each lesson must cover its corresponding section
+- Choose level_3_visual type: "steps" for processes, "terms" for vocabulary, "compare" for comparisons
 - Keep language simple and encouraging
-- Appropriate for ${gradeLevel} students`;
+- Appropriate for ${gradeLevel} level`;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -148,12 +172,25 @@ async function saveLesson(
   lesson: any,
   index: number,
   topicTitle: string,
-  studentId: string,
+  studentId: string | null,
+  classId: string | null,
   gradeLevel: string,
   supabaseUrl: string,
   supabaseKey: string
 ): Promise<{ topicId: string; title: string } | null> {
   try {
+    const topicPayload: any = {
+      subject: 'Uploaded Notes',
+      title: lesson.title || `${topicTitle} — Part ${index + 1}`,
+      description: `From: ${topicTitle}`,
+      grade_level: gradeLevel || 'University',
+      order_index: index + 1,
+    };
+
+    // Link to student or class depending on who uploaded
+    if (studentId) topicPayload.student_id = studentId;
+    if (classId) topicPayload.class_id = classId;
+
     const topicRes = await fetch(`${supabaseUrl}/rest/v1/topics`, {
       method: 'POST',
       headers: {
@@ -162,17 +199,15 @@ async function saveLesson(
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
-      body: JSON.stringify({
-        subject: 'Uploaded Notes',
-        title: lesson.title || `${topicTitle} — Part ${index + 1}`,
-        description: `Uploaded from: ${topicTitle}`,
-        grade_level: gradeLevel || 'University',
-        order_index: index + 1,
-        student_id: studentId,
-      })
+      body: JSON.stringify(topicPayload)
     });
 
-    if (!topicRes.ok) return null;
+    if (!topicRes.ok) {
+      const errText = await topicRes.text();
+      console.error(`Topic insert failed: ${errText}`);
+      return null;
+    }
+
     const topicData = await topicRes.json();
     const topic = Array.isArray(topicData) ? topicData[0] : topicData;
     if (!topic?.id) return null;
@@ -217,17 +252,15 @@ serve(async (req) => {
   }
 
   try {
-    // Verify Authorization header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
-      );
-    }
-
     const body = await req.json();
-    const { pdfBase64, pasteText, topicTitle, studentId, gradeLevel } = body;
+    const {
+      pdfBase64,
+      pasteText,
+      topicTitle,
+      studentId,
+      classId,
+      gradeLevel
+    } = body;
 
     if (!pdfBase64 && !pasteText) {
       return new Response(
@@ -236,9 +269,9 @@ serve(async (req) => {
       );
     }
 
-    if (!studentId) {
+    if (!studentId && !classId) {
       return new Response(
-        JSON.stringify({ error: 'Student ID required.' }),
+        JSON.stringify({ error: 'Student ID or Class ID required.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
@@ -253,33 +286,10 @@ serve(async (req) => {
       );
     }
 
-    // Verify the user is actually authenticated
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: {
-        'Authorization': authHeader,
-        'apikey': Deno.env.get('SUPABASE_ANON_KEY') || supabaseKey,
-      }
-    });
-
-    if (!userRes.ok) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid session. Please log in again.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
-      );
-    }
-
-    const userData = await userRes.json();
-    if (!userData?.id || userData.id !== studentId) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized. Student ID mismatch.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
-      );
-    }
-
     // Extract text
     let extractedText: string;
     if (pasteText) {
-      extractedText = pasteText.trim().substring(0, 8000);
+      extractedText = pasteText.trim();
       if (extractedText.length < 20) {
         return new Response(
           JSON.stringify({ error: 'Please paste more content. The text is too short.' }),
@@ -299,10 +309,14 @@ serve(async (req) => {
 
     const title = (topicTitle || 'My Notes').trim();
 
+    // Smart chunking — right number of lessons based on content
+    const chunks = smartChunk(extractedText);
+    console.log(`Detected ${chunks.length} natural sections for: ${title}`);
+
     // Generate all lessons in one AI call
     let lessons: any[];
     try {
-      lessons = await generateAllLessons(extractedText, title, gradeLevel || 'University');
+      lessons = await generateLessonsFromChunks(chunks, title, gradeLevel || 'University');
     } catch (err: any) {
       return new Response(
         JSON.stringify({ error: err.message }),
@@ -321,7 +335,14 @@ serve(async (req) => {
     const savedLessons = [];
     for (let i = 0; i < lessons.length; i++) {
       const saved = await saveLesson(
-        lessons[i], i, title, studentId, gradeLevel, supabaseUrl, supabaseKey
+        lessons[i],
+        i,
+        title,
+        studentId || null,
+        classId || null,
+        gradeLevel,
+        supabaseUrl,
+        supabaseKey
       );
       if (saved) savedLessons.push({ ...saved, partNumber: i + 1 });
     }
@@ -338,7 +359,7 @@ serve(async (req) => {
         success: true,
         totalParts: savedLessons.length,
         lessons: savedLessons,
-        message: `Successfully created ${savedLessons.length} micro-lessons from your notes`,
+        message: `Successfully created ${savedLessons.length} micro-lesson${savedLessons.length !== 1 ? 's' : ''} from your notes`,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );

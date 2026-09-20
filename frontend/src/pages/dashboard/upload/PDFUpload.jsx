@@ -10,13 +10,6 @@ const Icons = {
       <line x1="12" y1="3" x2="12" y2="15"/>
     </svg>
   ),
-  uploadSm: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="17 8 12 3 7 8"/>
-      <line x1="12" y1="3" x2="12" y2="15"/>
-    </svg>
-  ),
   file: (
     <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -65,16 +58,19 @@ const Icons = {
 
 const loadingSteps = [
   { text: 'Reading your content...', icon: Icons.file },
-  { text: 'Breaking into micro-lessons...', icon: Icons.book },
-  { text: 'Building adaptive explanations...', icon: Icons.brain },
+  { text: 'Detecting topic sections...', icon: Icons.book },
+  { text: 'Building adaptive lessons...', icon: Icons.brain },
   { text: 'Almost ready...', icon: Icons.spark },
 ];
 
-export default function PDFUpload({ profile, onNavigate }) {
+export default function PDFUpload({ profile }) {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
-  const [mode, setMode] = useState('pdf');
-  const [dragActive, setDragActive] = useState(false);
+
+  // Default to paste mode on mobile — more reliable
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const [mode, setMode] = useState(isMobile ? 'paste' : 'pdf');
+
   const [fileName, setFileName] = useState('');
   const [pdfBase64, setPdfBase64] = useState(null);
   const [pasteText, setPasteText] = useState('');
@@ -87,16 +83,17 @@ export default function PDFUpload({ profile, onNavigate }) {
   const readFile = (file) => {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setError('Only PDF files are supported. Please use "Paste Notes" for other formats.');
+      setError('Only PDF files are supported. Please use Paste Notes for other formats.');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File too large. Maximum size is 10MB. Try pasting the text directly instead.');
+    if (file.size > 15 * 1024 * 1024) {
+      setError('File too large. Maximum size is 15MB. Try pasting the text directly instead.');
       return;
     }
     setFileName(file.name);
     setError('');
     setPdfBase64(null);
+    if (!topicTitle) setTopicTitle(file.name.replace('.pdf', '').replace(/_/g, ' '));
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -114,14 +111,11 @@ export default function PDFUpload({ profile, onNavigate }) {
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
-    else setDragActive(false);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragActive(false);
     if (e.dataTransfer.files?.[0]) readFile(e.dataTransfer.files[0]);
   };
 
@@ -131,19 +125,22 @@ export default function PDFUpload({ profile, onNavigate }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (mode === 'pdf' && !pdfBase64) { setError('Please upload a PDF first.'); return; }
+    if (mode === 'pdf' && !pdfBase64) { setError('Please select a PDF file first.'); return; }
     if (mode === 'paste' && !pasteText.trim()) { setError('Please paste your notes first.'); return; }
+
     setError('');
     setProcessing(true);
     setLoadingStep(0);
 
     const stepInterval = setInterval(() => {
       setLoadingStep(prev => prev < loadingSteps.length - 1 ? prev + 1 : prev);
-    }, 6000);
+    }, 7000);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not logged in');
+      if (!user) throw new Error('Not logged in. Please log in again.');
+
+      const { data: { session } } = await supabase.auth.getSession();
 
       const { data, error: fnError } = await supabase.functions.invoke('process-pdf', {
         body: {
@@ -151,8 +148,11 @@ export default function PDFUpload({ profile, onNavigate }) {
           pasteText: mode === 'paste' ? pasteText : null,
           topicTitle: topicTitle.trim() || fileName.replace('.pdf', '') || 'My Notes',
           studentId: user.id,
-          gradeLevel: profile?.grade_level || 'University'
-        }
+          gradeLevel: profile?.grade_level || 'University',
+        },
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+        },
       });
 
       clearInterval(stepInterval);
@@ -165,15 +165,13 @@ export default function PDFUpload({ profile, onNavigate }) {
       if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
         setError('Connection lost. Please check your internet and try again.');
       } else if (msg.includes('timeout') || msg.includes('timed out')) {
-        setError('This is taking longer than usual. Please try again with a shorter piece of text.');
+        setError('This is taking too long. Please try again with a shorter piece of text.');
       } else if (msg.includes('extract') || msg.includes('Could not read') || msg.includes('Could not extract')) {
-        setError('Could not read this PDF. Please switch to "Paste Notes" and paste your content directly.');
+        setError('Could not read this PDF. Please switch to Paste Notes and paste your content directly.');
       } else if (msg.includes('Empty response') || msg.includes('OpenRouter') || msg.includes('AI')) {
         setError('Our AI is busy right now. Please wait a moment and try again.');
-      } else if (msg.includes('HTTP2') || msg.includes('protocol')) {
-        setError('Connection issue with our server. Please try again in a moment.');
       } else {
-        setError('Something went wrong. Please try Paste Notes mode instead.');
+        setError(msg || 'Something went wrong. Please try Paste Notes mode instead.');
       }
     } finally {
       setProcessing(false);
@@ -187,7 +185,7 @@ export default function PDFUpload({ profile, onNavigate }) {
     setTopicTitle('');
     setError('');
     setPasteText('');
-    setMode('pdf');
+    setMode(isMobile ? 'paste' : 'pdf');
   };
 
   // SUCCESS SCREEN
@@ -210,7 +208,7 @@ export default function PDFUpload({ profile, onNavigate }) {
           <h2 className="text-[22px] font-extrabold text-[#0F172A]">Your lessons are ready!</h2>
           <p className="text-[14px] text-[#475467] leading-[1.7]">
             We created <span className="font-bold text-[#136299]">{done.totalParts} micro-lesson{done.totalParts !== 1 ? 's' : ''}</span> from your notes.
-            Each one has 4 explanation levels and voice support.
+            Each one has 4 explanation levels, voice support, and a visual diagram.
           </p>
         </div>
 
@@ -223,7 +221,7 @@ export default function PDFUpload({ profile, onNavigate }) {
               </div>
               <div className="flex-1">
                 <p className="text-[14px] font-semibold text-[#0F172A]">{lesson.title}</p>
-                <p className="text-[12px] text-[#94A3B8]">4 explanation levels · Voice support</p>
+                <p className="text-[12px] text-[#94A3B8]">4 levels · Voice · Visual · Quiz</p>
               </div>
               <span className="text-[#5B9BD5]">{Icons.arrow}</span>
             </button>
@@ -269,11 +267,11 @@ export default function PDFUpload({ profile, onNavigate }) {
             ))}
           </div>
           <p className="text-[14px] text-[#475467]">{loadingSteps[loadingStep].text}</p>
-          <p className="text-[12px] text-[#94A3B8] mt-2">This takes about 20-30 seconds. Please wait.</p>
+          <p className="text-[12px] text-[#94A3B8] mt-2">This takes 20-40 seconds depending on content length.</p>
         </div>
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-4 w-full text-left">
           <p className="text-[13px] text-[#1E293B] leading-[1.6]">
-            Pathfinder is breaking your content into chunks and building adaptive lessons with 4 explanation levels and voice support for each part.
+            Pathfinder is detecting natural topic breaks in your content and building adaptive lessons — one per section — with 4 explanation levels, voice support, and visual diagrams.
           </p>
         </div>
       </div>
@@ -287,17 +285,15 @@ export default function PDFUpload({ profile, onNavigate }) {
         @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         .f1 { animation: fadeUp 0.4s ease forwards; }
         .f2 { animation: fadeUp 0.4s 0.08s ease both; }
-        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       <div className="f1">
         <h1 className="text-[24px] font-extrabold text-[#0F172A]">Upload Lecture Notes</h1>
         <p className="text-[14px] text-[#475467] mt-1">
-          Upload your PDF or paste your notes — we build adaptive micro-lessons instantly.
+          Upload a PDF or paste your notes — Pathfinder creates adaptive micro-lessons from your content automatically.
         </p>
       </div>
 
-      {/* ERROR */}
       {error && (
         <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl flex gap-3">
           <div className="flex-1">
@@ -334,48 +330,61 @@ export default function PDFUpload({ profile, onNavigate }) {
           </button>
         </div>
 
-        {/* PDF DROP ZONE */}
+        {/* PDF UPLOAD — mobile-friendly input covers entire drop zone */}
         {mode === 'pdf' && (
           <div
             onDragEnter={handleDrag} onDragOver={handleDrag}
             onDragLeave={handleDrag} onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
-              dragActive ? 'border-[#5B9BD5] bg-[#EFF6FF]'
-              : pdfBase64 ? 'border-[#70AD47] bg-[#F0FDF4]'
-              : 'border-[#E4E7EC] bg-[#F8FAFC] hover:border-[#5B9BD5] hover:bg-[#EFF6FF]'
+            className={`relative border-2 border-dashed rounded-2xl overflow-hidden transition-all ${
+              pdfBase64 ? 'border-[#70AD47] bg-[#F0FDF4]' : 'border-[#E4E7EC] bg-[#F8FAFC] hover:border-[#5B9BD5]'
             }`}
           >
+            {/* File input covers the whole area — works on mobile */}
             <input
               ref={fileInputRef}
               type="file"
               accept=".pdf,application/pdf"
               onChange={handleFileChange}
-              className="hidden"
-              capture={false}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                opacity: 0,
+                width: '100%',
+                height: '100%',
+                cursor: 'pointer',
+                zIndex: 10,
+              }}
             />
-            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${
-              pdfBase64 ? 'bg-[#70AD47] text-white' : 'bg-white border border-[#E4E7EC] text-[#94A3B8]'
-            }`}>
-              {pdfBase64 ? Icons.check : Icons.upload}
+            <div className="p-8 flex flex-col items-center justify-center text-center pointer-events-none">
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${
+                pdfBase64 ? 'bg-[#70AD47] text-white' : 'bg-white border border-[#E4E7EC] text-[#94A3B8]'
+              }`}>
+                {pdfBase64 ? Icons.check : Icons.upload}
+              </div>
+              {pdfBase64 ? (
+                <>
+                  <p className="text-[15px] font-bold text-[#336b07]">{fileName}</p>
+                  <p className="text-[13px] text-[#70AD47] mt-1">PDF loaded — ready to process</p>
+                  <button
+                    type="button"
+                    style={{ pointerEvents: 'auto' }}
+                    onClick={(e) => { e.stopPropagation(); setPdfBase64(null); setFileName(''); }}
+                    className="mt-3 text-[12px] text-[#94A3B8] hover:text-[#BA1A1A] transition-colors">
+                    Remove file
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-[15px] font-bold text-[#0F172A]">
+                    {isMobile ? 'Tap to select PDF' : 'Drag and drop your PDF'}
+                  </p>
+                  <p className="text-[13px] text-[#94A3B8] mt-1">
+                    {isMobile ? 'Lecture notes, textbook chapters, handouts' : 'or tap to browse files'}
+                  </p>
+                  <p className="text-[11px] text-[#94A3B8] mt-3">PDF files only · Max 15MB</p>
+                </>
+              )}
             </div>
-            {pdfBase64 ? (
-              <>
-                <p className="text-[15px] font-bold text-[#336b07]">{fileName}</p>
-                <p className="text-[13px] text-[#70AD47] mt-1">PDF loaded — ready to process</p>
-                <button type="button"
-                  onClick={(e) => { e.stopPropagation(); setPdfBase64(null); setFileName(''); }}
-                  className="mt-3 text-[12px] text-[#94A3B8] hover:text-[#BA1A1A] transition-colors">
-                  Remove file
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-[15px] font-bold text-[#0F172A]">Drag and drop your PDF</p>
-                <p className="text-[13px] text-[#94A3B8] mt-1">or tap to browse files</p>
-                <p className="text-[11px] text-[#94A3B8] mt-3">PDF files only · Max 10MB</p>
-              </>
-            )}
           </div>
         )}
 
@@ -393,11 +402,11 @@ export default function PDFUpload({ profile, onNavigate }) {
             </div>
             <div className="flex items-center justify-between">
               <p className="text-[12px] text-[#94A3B8]">
-                Paste any amount of text — we break it into micro-lessons automatically.
+                Paste any amount — Pathfinder detects natural sections automatically.
               </p>
               {pasteText.length > 0 && (
                 <p className="text-[12px] text-[#70AD47] font-semibold flex-shrink-0 ml-3">
-                  ~{Math.ceil(pasteText.length / 1500)} lesson{Math.ceil(pasteText.length / 1500) !== 1 ? 's' : ''}
+                  ~{Math.max(1, Math.ceil(pasteText.split(/\s+/).length / 400))} lesson{Math.max(1, Math.ceil(pasteText.split(/\s+/).length / 400)) !== 1 ? 's' : ''}
                 </p>
               )}
             </div>
@@ -426,9 +435,9 @@ export default function PDFUpload({ profile, onNavigate }) {
           <p className="text-[12px] font-bold text-[#475467] uppercase tracking-widest mb-3">What happens next</p>
           <div className="flex flex-col gap-2">
             {[
-              'Your content is broken into chunks',
-              'Each chunk becomes a micro-lesson with 4 explanation levels',
-              'Voice support added automatically',
+              'Pathfinder detects natural topic breaks in your content',
+              'Each section becomes a micro-lesson with 4 adaptive explanation levels',
+              'Voice support and visual diagrams added automatically',
               'Start learning immediately after processing',
             ].map((step, i) => (
               <div key={i} className="flex items-center gap-2.5">
