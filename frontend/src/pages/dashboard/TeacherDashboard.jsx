@@ -149,7 +149,7 @@ export default function TeacherDashboard() {
 
   const fetchAll = useCallback(async () => {
     try {
-     // eslint-disable-next-line no-unused-vars
+     const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate('/login'); return; }
 
       const { data: profileData, error: profileErr } = await supabase
@@ -297,8 +297,7 @@ export default function TeacherDashboard() {
     setCreatingClass(true);
     setClassError('');
     try {
-      // eslint-disable-next-line no-unused-vars
-const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       const code = generateCode();
       const { error } = await supabase.from('classes').insert({
         teacher_id: user.id,
