@@ -149,7 +149,7 @@ export default function TeacherDashboard() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+     // eslint-disable-next-line no-unused-vars
       if (!user) { navigate('/login'); return; }
 
       const { data: profileData, error: profileErr } = await supabase
