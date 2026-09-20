@@ -70,6 +70,12 @@ const Icons = {
       <path d="M6 12v5c3 3 9 3 12 0v-5"/>
     </svg>
   ),
+  book: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+    </svg>
+  ),
 };
 
 const subjectConfig = [
@@ -101,10 +107,7 @@ Pick whichever type best fits the topic.`;
     body: JSON.stringify({
       model: 'openrouter/free',
       messages: [
-        {
-          role: 'system',
-          content: 'You are a patient teacher. Output ONLY raw valid JSON. No markdown. No backticks. Just raw JSON.'
-        },
+        { role: 'system', content: 'You are a patient teacher. Output ONLY raw valid JSON. No markdown. No backticks. Just raw JSON.' },
         { role: 'user', content: prompt }
       ],
       temperature: 0.2,
@@ -113,15 +116,12 @@ Pick whichever type best fits the topic.`;
   });
 
   if (!response.ok) throw new Error(`OpenRouter error: ${response.status}`);
-
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty response from AI');
-
   const clean = content.replace(/```json|```/g, '').trim();
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('No valid JSON in response');
-
   return JSON.parse(jsonMatch[0]);
 }
 
@@ -138,7 +138,7 @@ export default function Subjects({ profile, onNavigate }) {
   const [subjectProgress, setSubjectProgress] = useState({});
   const [subjectLoading, setSubjectLoading] = useState(true);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [teacherMaterials, setTeacherMaterials] = useState([]);
+  const [teacherTopics, setTeacherTopics] = useState([]);
 
   const isUniversity = profile?.student_level === 'university';
 
@@ -196,6 +196,7 @@ export default function Subjects({ profile, onNavigate }) {
       }
       setSubjectProgress(subMap);
 
+      // Fetch topics uploaded by teacher for this student's classes
       const { data: memberData } = await supabase
         .from('class_members')
         .select('class_id')
@@ -203,13 +204,17 @@ export default function Subjects({ profile, onNavigate }) {
 
       if (memberData && memberData.length > 0) {
         const classIds = memberData.map(m => m.class_id);
-        const { data: materials } = await supabase
-          .from('class_materials')
-          .select('*, classes(name, subject)')
+
+        // Fetch topics linked to those classes
+        const { data: classTopics } = await supabase
+          .from('topics')
+          .select('*')
           .in('class_id', classIds)
           .order('created_at', { ascending: false });
-        setTeacherMaterials(materials || []);
+
+        setTeacherTopics(classTopics || []);
       }
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -488,27 +493,46 @@ export default function Subjects({ profile, onNavigate }) {
         </div>
       )}
 
-      {/* TEACHER MATERIALS */}
-      {!isUniversity && teacherMaterials.length > 0 && (
+      {/* TEACHER UPLOADED LESSONS */}
+      {teacherTopics.length > 0 && (
         <div className="f3">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-[#70AD47]">{Icons.teacher}</div>
             <h2 className="text-[14px] font-bold text-[#0F172A]">From Your Teacher</h2>
+            <span className="text-[11px] font-semibold text-[#94A3B8] bg-[#F1F5F9] px-2 py-0.5 rounded-full">
+              {teacherTopics.length} lesson{teacherTopics.length !== 1 ? 's' : ''}
+            </span>
           </div>
           <div className="flex flex-col gap-2">
-            {teacherMaterials.map((m, i) => (
-              <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">
-                  {Icons.file}
-                </div>
-                <div className="flex-1">
-                  <p className="text-[14px] font-semibold text-[#0F172A]">{m.title}</p>
-                  <p className="text-[12px] text-[#94A3B8]">
-                    {m.classes?.name} · {m.description || 'No description'}
-                  </p>
-                </div>
-              </div>
-            ))}
+            {teacherTopics.map((topic, i) => {
+              const p = progress[topic.id];
+              return (
+                <button key={i}
+                  onClick={() => navigate(`/lesson/${topic.id}`)}
+                  className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3 hover:border-[#70AD47] hover:shadow-sm transition-all text-left active:scale-[0.99]">
+                  <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">
+                    {Icons.book}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[14px] font-semibold text-[#0F172A] truncate">{topic.title}</p>
+                    <p className="text-[12px] text-[#94A3B8] mt-0.5">
+                      {topic.subject || 'Uploaded Notes'} · 4 explanation levels
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {p?.completed && (
+                      <span className="text-[#70AD47]">{Icons.check}</span>
+                    )}
+                    {p && !p.completed && (
+                      <span className="text-[11px] font-semibold text-[#F59E0B] bg-[#FFFBEB] px-2 py-0.5 rounded-full">
+                        In progress
+                      </span>
+                    )}
+                    <span className="text-[#70AD47]">{Icons.arrow}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
