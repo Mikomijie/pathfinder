@@ -26,7 +26,6 @@ async function extractTextFromPDF(base64: string): Promise<string> {
 }
 
 function smartChunk(text: string): string[] {
-  // Detect natural topic breaks — headings, sections, double line breaks
   const lines = text.split('\n');
   const chunks: string[] = [];
   let currentChunk = '';
@@ -34,13 +33,9 @@ function smartChunk(text: string): string[] {
   const isHeading = (line: string): boolean => {
     const trimmed = line.trim();
     if (!trimmed) return false;
-    // Short lines that look like headings
     if (trimmed.length < 80 && trimmed.length > 2) {
-      // All caps
       if (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)) return true;
-      // Numbered section like "1." or "1.1" or "Chapter"
       if (/^(\d+[\.\)]|chapter|section|topic|unit|part|introduction|conclusion|summary)/i.test(trimmed)) return true;
-      // Ends with colon
       if (trimmed.endsWith(':') && trimmed.split(' ').length <= 6) return true;
     }
     return false;
@@ -49,8 +44,6 @@ function smartChunk(text: string): string[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-
-    // If we hit a heading and current chunk has enough content, save it
     if (isHeading(trimmed) && currentChunk.trim().split(/\s+/).length > 200) {
       chunks.push(currentChunk.trim());
       currentChunk = line + '\n';
@@ -59,12 +52,10 @@ function smartChunk(text: string): string[] {
     }
   }
 
-  // Push the last chunk
   if (currentChunk.trim().length > 100) {
     chunks.push(currentChunk.trim());
   }
 
-  // If no natural breaks found or only one chunk, split by word count
   if (chunks.length <= 1) {
     const words = text.split(/\s+/);
     const wordsPerChunk = Math.ceil(words.length / Math.min(10, Math.ceil(words.length / 500)));
@@ -87,7 +78,6 @@ async function generateLessonsFromChunks(
   const key = Deno.env.get('OPENROUTER_API_KEY');
   if (!key) throw new Error('OPENROUTER_API_KEY not configured');
 
-  // Build prompt with all chunks — one AI call for all lessons
   const chunksText = chunks.map((chunk, i) =>
     `--- SECTION ${i + 1} ---\n${chunk.substring(0, 1200)}`
   ).join('\n\n');
@@ -187,7 +177,6 @@ async function saveLesson(
       order_index: index + 1,
     };
 
-    // Link to student or class depending on who uploaded
     if (studentId) topicPayload.student_id = studentId;
     if (classId) topicPayload.class_id = classId;
 
@@ -253,14 +242,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const {
-      pdfBase64,
-      pasteText,
-      topicTitle,
-      studentId,
-      classId,
-      gradeLevel
-    } = body;
+    const { pdfBase64, pasteText, topicTitle, studentId, classId, gradeLevel } = body;
 
     if (!pdfBase64 && !pasteText) {
       return new Response(
@@ -308,12 +290,9 @@ serve(async (req) => {
     }
 
     const title = (topicTitle || 'My Notes').trim();
-
-    // Smart chunking — right number of lessons based on content
     const chunks = smartChunk(extractedText);
     console.log(`Detected ${chunks.length} natural sections for: ${title}`);
 
-    // Generate all lessons in one AI call
     let lessons: any[];
     try {
       lessons = await generateLessonsFromChunks(chunks, title, gradeLevel || 'University');
@@ -331,13 +310,10 @@ serve(async (req) => {
       );
     }
 
-    // Save all lessons
     const savedLessons = [];
     for (let i = 0; i < lessons.length; i++) {
       const saved = await saveLesson(
-        lessons[i],
-        i,
-        title,
+        lessons[i], i, title,
         studentId || null,
         classId || null,
         gradeLevel,
