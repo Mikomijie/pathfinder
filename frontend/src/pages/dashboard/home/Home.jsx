@@ -147,6 +147,16 @@ export default function Home({ profile, onNavigate }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Check if student already has a class membership
+      const { data: memberData } = await supabase
+        .from('class_members')
+        .select('id')
+        .eq('student_id', user.id)
+        .limit(1);
+      if (memberData && memberData.length > 0) {
+        setClassJoined(true);
+      }
+
       const { data: progressData } = await supabase
         .from('student_progress')
         .select('*, topics(title, subject, id, order_index)')
@@ -159,13 +169,11 @@ export default function Home({ profile, onNavigate }) {
         return;
       }
 
-      // Stats
       const completed = progressData.filter(p => p.completed).length;
       const scores = progressData.filter(p => p.score > 0).map(p => p.score);
       const avgScore = scores.length > 0
         ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
 
-      // Streak
       const completedDates = progressData
         .filter(p => p.completed && p.last_studied_at)
         .map(p => new Date(p.last_studied_at).toDateString());
@@ -182,7 +190,6 @@ export default function Home({ profile, onNavigate }) {
       setStats({ completed, avgScore, streak });
       setLastTopic(progressData[0]);
 
-      // Find NEXT INCOMPLETE topic across all subjects
       if (!isUniversity) {
         const allTopics = await Promise.all(
           subjectConfig.map(s =>
@@ -196,7 +203,6 @@ export default function Home({ profile, onNavigate }) {
         const nextIncomplete = allTopicsList.find(t => !progressMap[t.id]?.completed);
         setNextIncompleteTopic(nextIncomplete || null);
 
-        // Subject progress
         const subMap = {};
         for (const s of subjectConfig) {
           const topicsForSubject = allTopics
@@ -214,7 +220,6 @@ export default function Home({ profile, onNavigate }) {
         setSubjectProgress(subMap);
       }
 
-      // University uploaded lessons
       if (isUniversity) {
         const uploaded = progressData
           .filter(p => p.topics?.subject === 'Uploaded Notes')
@@ -235,11 +240,16 @@ export default function Home({ profile, onNavigate }) {
     setJoiningClass(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+
       const { data: classData } = await supabase
-        .from('classes').select('id, name').eq('code', classCode.toUpperCase().trim()).single();
+        .from('classes')
+        .select('id, name')
+        .eq('code', classCode.toUpperCase().trim())
+        .maybeSingle();
 
       if (!classData) {
-        alert('Class code not found. Please check with your teacher.');
+        alert('Class code not found. Please check the code with your teacher.');
+        setJoiningClass(false);
         return;
       }
 
@@ -248,7 +258,7 @@ export default function Home({ profile, onNavigate }) {
         student_id: user.id,
       });
 
-      if (error && error.code !== '23505') throw error; // ignore duplicate
+      if (error && error.code !== '23505') throw error;
       setClassJoined(true);
       setClassCode('');
     } catch (err) {
@@ -262,7 +272,6 @@ export default function Home({ profile, onNavigate }) {
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
   const continueTarget = nextIncompleteTopic || lastTopic?.topics;
 
-  // Stats sidebar — same for both
   const StatsSidebar = () => (
     <div className="flex flex-col gap-4">
       <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
@@ -287,7 +296,6 @@ export default function Home({ profile, onNavigate }) {
         </div>
       </div>
 
-      {/* Badges */}
       {!isUniversity && (
         <div className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -332,7 +340,6 @@ export default function Home({ profile, onNavigate }) {
         </div>
       )}
 
-      {/* Daily tip */}
       <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-[#336b07]">{Icons.lightbulb}</div>
@@ -343,7 +350,7 @@ export default function Home({ profile, onNavigate }) {
     </div>
   );
 
-  // ─── UNIVERSITY HOME ───────────────────────────────────────────
+  // UNIVERSITY HOME
   if (isUniversity) {
     return (
       <div className="flex flex-col gap-6">
@@ -366,7 +373,6 @@ export default function Home({ profile, onNavigate }) {
           </p>
         </div>
 
-        {/* FIRST TIME ONBOARDING */}
         {stats.completed === 0 && !loading && (
           <div className="f2 flex flex-col gap-3">
             <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Three ways to start</p>
@@ -391,7 +397,6 @@ export default function Home({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* RETURNING USER — CONTINUE */}
         {stats.completed > 0 && lastTopic && (
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">Continue where you left off</span>
@@ -410,7 +415,6 @@ export default function Home({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* QUICK ACTIONS — returning */}
         {stats.completed > 0 && (
           <div className="f3 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
@@ -430,7 +434,6 @@ export default function Home({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* RECENT UPLOADED LESSONS */}
         {uploadedLessons.length > 0 && (
           <div className="f3">
             <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest mb-3">Recent Notes</p>
@@ -454,7 +457,6 @@ export default function Home({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* STATS + TIP */}
         <div className="f4 flex flex-col lg:flex-row gap-4">
           <div className="flex-1 bg-white border border-[#E4E7EC] rounded-2xl p-5">
             <h3 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Your Stats</h3>
@@ -489,7 +491,7 @@ export default function Home({ profile, onNavigate }) {
     );
   }
 
-  // ─── SECONDARY HOME ────────────────────────────────────────────
+  // SECONDARY HOME
   return (
     <div className="flex flex-col gap-6">
       <style>{`
@@ -505,7 +507,6 @@ export default function Home({ profile, onNavigate }) {
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 flex flex-col gap-5">
 
-          {/* WELCOME */}
           <div className="f1">
             <h1 className="text-[26px] md:text-[30px] font-extrabold text-[#0F172A]">
               {greeting}, {firstName}.
@@ -517,7 +518,6 @@ export default function Home({ profile, onNavigate }) {
             </p>
           </div>
 
-          {/* CONTINUE / START CARD — shows NEXT INCOMPLETE topic */}
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">
               {continueTarget ? (nextIncompleteTopic ? 'Up next' : 'Continue where you left off') : 'Start learning'}
@@ -550,14 +550,12 @@ export default function Home({ profile, onNavigate }) {
                   else if (lastTopic) navigate(`/lesson/${lastTopic.topic_id}`);
                   else navigate('/topics/Mathematics');
                 }}
-                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0 active:scale-[0.98]"
-              >
+                className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0 active:scale-[0.98]">
                 {nextIncompleteTopic ? 'Start' : lastTopic?.completed ? 'Review' : 'Continue'} {Icons.arrow}
               </button>
             </div>
           </div>
 
-          {/* SUBJECTS */}
           <div className="f3">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[15px] font-bold text-[#0F172A]">My Subjects</h2>
@@ -600,7 +598,6 @@ export default function Home({ profile, onNavigate }) {
             </div>
           </div>
 
-          {/* JOIN CLASS CODE */}
           {!classJoined && (
             <div className="f4 bg-[#F8FAFC] border border-[#E4E7EC] rounded-2xl p-5">
               <div className="flex items-center gap-3 mb-3">
@@ -631,14 +628,13 @@ export default function Home({ profile, onNavigate }) {
             <div className="f4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-4 flex items-center gap-3">
               <div className="text-[#70AD47]">{Icons.check}</div>
               <p className="text-[13px] font-semibold text-[#336b07]">
-                You joined the class. Your teacher's materials will appear in My Subjects.
+                You are in a class. Your teacher's lessons appear in My Subjects.
               </p>
             </div>
           )}
 
         </div>
 
-        {/* RIGHT SIDEBAR */}
         <div className="lg:w-[280px]">
           <StatsSidebar/>
         </div>
