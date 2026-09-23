@@ -230,13 +230,7 @@ export default function TeacherDashboard() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      await supabase.auth.refreshSession();
-const { data: { session } } = await supabase.auth.getSession();
-if (!session) {
-  setUploadError('Your session has expired. Please log out and log back in.');
-  setUploading(false);
-  return;
-}
+
 
       // Get class level for context
       const selectedClassData = classes.find(c => c.id === uploadClassId);
@@ -267,9 +261,6 @@ if (!session) {
 
       const { data, error } = await supabase.functions.invoke('process-pdf', {
         body: payload,
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
-        },
       });
 
       if (error) throw error;

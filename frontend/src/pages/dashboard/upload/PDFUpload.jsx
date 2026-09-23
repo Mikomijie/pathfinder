@@ -140,7 +140,6 @@ export default function PDFUpload({ profile }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not logged in. Please log in again.');
 
-      const { data: { session } } = await supabase.auth.getSession();
 
       const { data, error: fnError } = await supabase.functions.invoke('process-pdf', {
         body: {
@@ -149,9 +148,6 @@ export default function PDFUpload({ profile }) {
           topicTitle: topicTitle.trim() || fileName.replace('.pdf', '') || 'My Notes',
           studentId: user.id,
           gradeLevel: profile?.grade_level || 'University',
-        },
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
         },
       });
 
