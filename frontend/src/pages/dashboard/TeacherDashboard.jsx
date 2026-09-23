@@ -274,12 +274,16 @@ export default function TeacherDashboard() {
       });
 
       setUploadSuccess(`${data.message}. Students in this class can now study them.`);
-      setUploadTitle('');
-      setUploadFile(null);
-      setPasteText('');
-      setUploadClassId('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      fetchAll();
+setUploadTitle('');
+setUploadFile(null);
+setPasteText('');
+setUploadClassId('');
+if (fileInputRef.current) fileInputRef.current.value = '';
+fetchAll();
+setTimeout(() => {
+  setUploadSuccess('');
+  setActiveNav('home');
+}, 3000);
     } catch (err) {
       console.error(err);
       setUploadError(err.message || 'Upload failed. Please try again.');
