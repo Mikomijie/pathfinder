@@ -230,7 +230,13 @@ export default function TeacherDashboard() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const { data: { session } } = await supabase.auth.getSession();
+      await supabase.auth.refreshSession();
+const { data: { session } } = await supabase.auth.getSession();
+if (!session) {
+  setUploadError('Your session has expired. Please log out and log back in.');
+  setUploading(false);
+  return;
+}
 
       // Get class level for context
       const selectedClassData = classes.find(c => c.id === uploadClassId);
