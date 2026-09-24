@@ -116,6 +116,18 @@ const Icons = {
       <path d="M19 12H5M12 5l-7 7 7 7"/>
     </svg>
   ),
+  alert: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  ),
+  star: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+    </svg>
+  ),
 };
 
 const generateCode = () => {
@@ -134,12 +146,13 @@ export default function TeacherDashboard() {
   const [profile, setProfile] = useState(null);
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
+  const [studentProgress, setStudentProgress] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
   const [activeNav, setActiveNav] = useState('home');
   const [selectedClass, setSelectedClass] = useState(null);
-  const [viewingClass, setViewingClass] = useState(null); // class detail view
+  const [viewingClass, setViewingClass] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState('');
   const [showNewClass, setShowNewClass] = useState(false);
@@ -147,7 +160,6 @@ export default function TeacherDashboard() {
   const [creatingClass, setCreatingClass] = useState(false);
   const [classError, setClassError] = useState('');
 
-  // Upload state
   const [uploadMode, setUploadMode] = useState('pdf');
   const [uploadClassId, setUploadClassId] = useState('');
   const [uploadTitle, setUploadTitle] = useState('');
@@ -185,6 +197,16 @@ export default function TeacherDashboard() {
           .in('class_id', classIds);
         setStudents(membersData || []);
 
+        // Fetch student progress for all students
+        const studentIds = (membersData || []).map(m => m.student_id);
+        if (studentIds.length > 0) {
+          const { data: progressData } = await supabase
+            .from('student_progress')
+            .select('student_id, completed, score, is_stuck, last_studied_at, topic_id, topics(title, subject)')
+            .in('student_id', studentIds);
+          setStudentProgress(progressData || []);
+        }
+
         const { data: materialsData } = await supabase
           .from('class_materials').select('*').in('class_id', classIds)
           .order('created_at', { ascending: false });
@@ -200,6 +222,18 @@ export default function TeacherDashboard() {
 
   useEffect(() => {
     fetchAll();
+
+    // Realtime — refresh when a student joins any class
+    const channel = supabase
+      .channel('class-members-realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'class_members'
+      }, () => { fetchAll(); })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [fetchAll]);
 
   const handleLogout = async () => {
@@ -216,14 +250,8 @@ export default function TeacherDashboard() {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== 'application/pdf') {
-      setUploadError('Please select a PDF file.');
-      return;
-    }
-    if (file.size > 15 * 1024 * 1024) {
-      setUploadError('File too large. Maximum 15MB.');
-      return;
-    }
+    if (file.type !== 'application/pdf') { setUploadError('Please select a PDF file.'); return; }
+    if (file.size > 15 * 1024 * 1024) { setUploadError('File too large. Maximum 15MB.'); return; }
     setUploadFile(file);
     setUploadError('');
     if (!uploadTitle) setUploadTitle(file.name.replace('.pdf', ''));
@@ -245,11 +273,7 @@ export default function TeacherDashboard() {
       const selectedClassData = classes.find(c => c.id === uploadClassId);
       const gradeLevel = selectedClassData?.level || 'Secondary';
 
-      let payload = {
-        topicTitle: uploadTitle.trim(),
-        classId: uploadClassId,
-        gradeLevel,
-      };
+      let payload = { topicTitle: uploadTitle.trim(), classId: uploadClassId, gradeLevel };
 
       if (uploadMode === 'pdf') {
         setUploadStep('Reading PDF...');
@@ -267,21 +291,20 @@ export default function TeacherDashboard() {
       setUploadStep('AI is creating lessons from your content...');
 
       let data, error;
-// Retry once on failure — handles cold start
-const result1 = await supabase.functions.invoke('process-pdf', { body: payload });
-if (result1.error) {
-  console.log('First attempt failed, retrying...');
-  setUploadStep('Retrying...');
-  await new Promise(r => setTimeout(r, 3000));
-  const result2 = await supabase.functions.invoke('process-pdf', { body: payload });
-  data = result2.data;
-  error = result2.error;
-} else {
-  data = result1.data;
-  error = result1.error;
-}
+      const result1 = await supabase.functions.invoke('process-pdf', { body: payload });
+      if (result1.error) {
+        console.log('First attempt failed, retrying...');
+        setUploadStep('Retrying...');
+        await new Promise(r => setTimeout(r, 3000));
+        const result2 = await supabase.functions.invoke('process-pdf', { body: payload });
+        data = result2.data;
+        error = result2.error;
+      } else {
+        data = result1.data;
+        error = result1.error;
+      }
 
-if (error) throw error;
+      if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Upload failed');
 
       await supabase.from('class_materials').insert({
@@ -295,6 +318,7 @@ if (error) throw error;
       setUploadTitle('');
       setUploadFile(null);
       setPasteText('');
+      setUploadClassId('');
       if (fileInputRef.current) fileInputRef.current.value = '';
       fetchAll();
     } catch (err) {
@@ -311,9 +335,7 @@ if (error) throw error;
     try {
       await supabase.from('class_materials').delete().eq('id', materialId);
       fetchAll();
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   const handleDeleteClass = async (classId) => {
@@ -323,9 +345,7 @@ if (error) throw error;
       await supabase.from('classes').delete().eq('id', classId);
       setViewingClass(null);
       fetchAll();
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   const handleCreateClass = async (e) => {
@@ -352,6 +372,21 @@ if (error) throw error;
     } finally {
       setCreatingClass(false);
     }
+  };
+
+  // Get progress summary for a student
+  const getStudentStats = (studentId) => {
+    const progress = studentProgress.filter(p => p.student_id === studentId);
+    const completed = progress.filter(p => p.completed).length;
+    const scores = progress.filter(p => p.score > 0).map(p => p.score);
+    const avgScore = scores.length > 0
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    const isStuck = progress.some(p => p.is_stuck);
+    const lastStudied = progress
+      .filter(p => p.last_studied_at)
+      .sort((a, b) => new Date(b.last_studied_at).getTime() - new Date(a.last_studied_at).getTime())[0];
+    const lastTopic = lastStudied?.topics?.title || null;
+    return { completed, avgScore, isStuck, lastTopic };
   };
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
@@ -471,7 +506,6 @@ if (error) throw error;
                 <p className="text-[14px] text-[#475467] mt-1">Here is what is happening across your classes today.</p>
               </div>
 
-              {/* ALL CLASS CODES */}
               {classes.length > 0 ? (
                 <div className="f2 flex flex-col gap-3">
                   <p className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-widest">Your Class Codes</p>
@@ -536,7 +570,6 @@ if (error) throw error;
                   <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-6 text-center">
                     <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">{Icons.upload}</div>
                     <p className="text-[14px] font-semibold text-[#0F172A]">No materials uploaded yet</p>
-                    <p className="text-[13px] text-[#94A3B8] mt-1">Upload your first PDF for students to study.</p>
                     <button onClick={() => setActiveNav('upload')}
                       className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] text-white text-[13px] font-bold rounded-xl mx-auto">
                       Upload Material {Icons.arrow}
@@ -553,10 +586,7 @@ if (error) throw error;
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <span className="text-[11px] text-[#94A3B8]">{new Date(m.created_at).toLocaleDateString()}</span>
-                          <button onClick={() => handleDeleteMaterial(m.id)}
-                            className="text-[#94A3B8] hover:text-[#BA1A1A] transition-colors p-1">
-                            {Icons.trash}
-                          </button>
+                          <button onClick={() => handleDeleteMaterial(m.id)} className="text-[#94A3B8] hover:text-[#BA1A1A] p-1">{Icons.trash}</button>
                         </div>
                       </div>
                     ))}
@@ -580,9 +610,7 @@ if (error) throw error;
                 </button>
               </div>
 
-              {classError && (
-                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A]">{classError}</div>
-              )}
+              {classError && <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A]">{classError}</div>}
 
               {showNewClass && (
                 <div className="f1 bg-white border border-[#E4E7EC] rounded-2xl p-5">
@@ -635,8 +663,7 @@ if (error) throw error;
                     const classStudents = students.filter(s => s.class_id === c.id);
                     const classMaterials = materials.filter(m => m.class_id === c.id);
                     return (
-                      <button key={i}
-                        onClick={() => setViewingClass(c)}
+                      <button key={i} onClick={() => setViewingClass(c)}
                         className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-3 hover:border-[#336b07] hover:shadow-sm transition-all text-left w-full active:scale-[0.99]">
                         <div>
                           <h3 className="text-[15px] font-bold text-[#0F172A]">{c.name}</h3>
@@ -663,7 +690,7 @@ if (error) throw error;
             <div className="flex flex-col gap-5">
               <div className="f1 flex items-center gap-3">
                 <button onClick={() => setViewingClass(null)}
-                  className="flex items-center gap-2 text-[14px] text-[#475467] hover:text-[#0F172A] transition-colors">
+                  className="flex items-center gap-2 text-[14px] text-[#475467] hover:text-[#0F172A]">
                   {Icons.back} My Classes
                 </button>
               </div>
@@ -694,7 +721,6 @@ if (error) throw error;
                 </div>
               </div>
 
-              {/* Students in this class */}
               <div className="f3">
                 <h3 className="text-[15px] font-bold text-[#0F172A] mb-3">
                   Students ({students.filter(s => s.class_id === viewingClass.id).length})
@@ -706,25 +732,42 @@ if (error) throw error;
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {students.filter(s => s.class_id === viewingClass.id).map((s, i) => (
-                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-[#136299] flex items-center justify-center text-white text-[13px] font-bold flex-shrink-0">
-                          {s.profiles?.full_name?.[0]?.toUpperCase() || '?'}
+                    {students.filter(s => s.class_id === viewingClass.id).map((s, i) => {
+                      const stats = getStudentStats(s.student_id);
+                      return (
+                        <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[#136299] flex items-center justify-center text-white text-[13px] font-bold flex-shrink-0">
+                            {s.profiles?.full_name?.[0]?.toUpperCase() || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name || 'Unknown'}</p>
+                              {stats.isStuck && (
+                                <span className="flex items-center gap-1 text-[10px] font-bold text-[#BA1A1A] bg-[#FFF1F1] px-2 py-0.5 rounded-full">
+                                  {Icons.alert} Needs help
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[12px] text-[#94A3B8] mt-0.5 truncate">{s.profiles?.email}</p>
+                            {stats.lastTopic && (
+                              <p className="text-[11px] text-[#475467] mt-0.5">
+                                Last studied: {stats.lastTopic}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <span className="text-[12px] font-bold text-[#136299]">{stats.completed} topics done</span>
+                            {stats.avgScore > 0 && (
+                              <span className="text-[11px] text-[#94A3B8]">Avg: {stats.avgScore}%</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name || 'Unknown'}</p>
-                          <p className="text-[12px] text-[#94A3B8] truncate">{s.profiles?.grade_level} · {s.profiles?.email}</p>
-                        </div>
-                        <p className="text-[11px] text-[#94A3B8] flex-shrink-0">
-                          {new Date(s.joined_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Materials in this class */}
               <div className="f4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-[15px] font-bold text-[#0F172A]">
@@ -753,9 +796,7 @@ if (error) throw error;
                           <p className="text-[12px] text-[#94A3B8]">{m.description}</p>
                         </div>
                         <button onClick={() => handleDeleteMaterial(m.id)}
-                          className="text-[#94A3B8] hover:text-[#BA1A1A] transition-colors p-1 flex-shrink-0">
-                          {Icons.trash}
-                        </button>
+                          className="text-[#94A3B8] hover:text-[#BA1A1A] p-1 flex-shrink-0">{Icons.trash}</button>
                       </div>
                     ))}
                   </div>
@@ -772,9 +813,7 @@ if (error) throw error;
                 <p className="text-[14px] text-[#475467] mt-1">Upload a PDF or paste notes. Pathfinder turns them into adaptive lessons for your students.</p>
               </div>
 
-              {uploadError && (
-                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A]">{uploadError}</div>
-              )}
+              {uploadError && <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A]">{uploadError}</div>}
 
               {uploadSuccess && (
                 <div className="flex flex-col gap-3">
@@ -786,9 +825,7 @@ if (error) throw error;
                       <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Lessons created for students</p>
                       {uploadedLessons.map((lesson, i) => (
                         <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299] text-[12px] font-bold flex-shrink-0">
-                            {i + 1}
-                          </div>
+                          <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299] text-[12px] font-bold flex-shrink-0">{i + 1}</div>
                           <p className="text-[14px] font-semibold text-[#0F172A]">{lesson.title}</p>
                         </div>
                       ))}
@@ -799,11 +836,9 @@ if (error) throw error;
 
               <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-8">
                 <form onSubmit={handleUpload} className="flex flex-col gap-5">
-
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Select Class</label>
-                    <select required value={uploadClassId}
-                      onChange={e => setUploadClassId(e.target.value)}
+                    <select required value={uploadClassId} onChange={e => setUploadClassId(e.target.value)}
                       className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] appearance-none">
                       <option value="">Choose a class</option>
                       {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -813,8 +848,7 @@ if (error) throw error;
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Material Title</label>
                     <input type="text" required placeholder="e.g. Chapter 3: Fractions, Week 5 Notes"
-                      value={uploadTitle}
-                      onChange={e => setUploadTitle(e.target.value)}
+                      value={uploadTitle} onChange={e => setUploadTitle(e.target.value)}
                       className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47]"/>
                   </div>
 
@@ -871,8 +905,7 @@ if (error) throw error;
                     <div>
                       <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Your Notes</label>
                       <textarea rows={8} placeholder="Paste your lesson notes, textbook content, or any teaching material here..."
-                        value={pasteText}
-                        onChange={e => setPasteText(e.target.value)}
+                        value={pasteText} onChange={e => setPasteText(e.target.value)}
                         className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] resize-none"/>
                     </div>
                   )}
@@ -907,8 +940,17 @@ if (error) throw error;
             <div className="flex flex-col gap-5">
               <div className="f1">
                 <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Students</h1>
-                <p className="text-[14px] text-[#475467] mt-1">All students across your classes.</p>
+                <p className="text-[14px] text-[#475467] mt-1">All students across your classes with their progress.</p>
               </div>
+
+              {studentProgress.some(p => p.is_stuck) && (
+                <div className="f2 p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl flex items-center gap-3">
+                  <span className="text-[#BA1A1A]">{Icons.alert}</span>
+                  <p className="text-[13px] font-semibold text-[#BA1A1A]">
+                    {studentProgress.filter(p => p.is_stuck).length} student{studentProgress.filter(p => p.is_stuck).length !== 1 ? 's' : ''} flagged as needing help.
+                  </p>
+                </div>
+              )}
 
               {classes.length > 1 && (
                 <div className="f2 flex items-center gap-2 flex-wrap">
@@ -940,20 +982,41 @@ if (error) throw error;
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    {students.filter(s => s.class_id === selectedClass?.id).map((s, i) => (
-                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[#136299] flex items-center justify-center text-white text-[14px] font-bold flex-shrink-0">
-                          {s.profiles?.full_name?.[0]?.toUpperCase() || '?'}
+                    {students.filter(s => s.class_id === selectedClass?.id).map((s, i) => {
+                      const stats = getStudentStats(s.student_id);
+                      return (
+                        <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-[#136299] flex items-center justify-center text-white text-[14px] font-bold flex-shrink-0">
+                            {s.profiles?.full_name?.[0]?.toUpperCase() || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name || 'Unknown'}</p>
+                              {stats.isStuck && (
+                                <span className="flex items-center gap-1 text-[10px] font-bold text-[#BA1A1A] bg-[#FFF1F1] px-2 py-0.5 rounded-full">
+                                  {Icons.alert} Needs help
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[12px] text-[#94A3B8] truncate">{s.profiles?.grade_level} · {s.profiles?.email}</p>
+                            {stats.lastTopic && (
+                              <p className="text-[11px] text-[#475467] mt-0.5">Currently studying: {stats.lastTopic}</p>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <span className="text-[13px] font-bold text-[#136299]">{stats.completed} done</span>
+                            {stats.avgScore > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] text-[#F59E0B] font-semibold">
+                                {Icons.star} {stats.avgScore}%
+                              </span>
+                            )}
+                            <span className="text-[11px] text-[#94A3B8]">
+                              Joined {new Date(s.joined_at).toLocaleDateString()}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name || 'Unknown'}</p>
-                          <p className="text-[12px] text-[#94A3B8] truncate">{s.profiles?.grade_level} · {s.profiles?.email}</p>
-                        </div>
-                        <p className="text-[11px] text-[#94A3B8] flex-shrink-0">
-                          {new Date(s.joined_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
