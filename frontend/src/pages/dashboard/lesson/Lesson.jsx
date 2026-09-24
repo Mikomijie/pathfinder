@@ -866,21 +866,43 @@ export default function Lesson() {
       </div>
 
       {/* BOTTOM BAR */}
-      <div className="bg-white border-t border-[#E4E7EC] sticky bottom-0"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="max-w-[760px] mx-auto px-5 md:px-8 py-4 flex items-center justify-between gap-3">
-          <button onClick={handleExplainDifferently} disabled={currentLevel >= 4}
-            className="flex items-center gap-2 px-5 py-3 bg-[#F8FAFC] border border-[#E4E7EC] hover:border-[#5B9BD5] disabled:opacity-40 disabled:cursor-not-allowed text-[#475467] text-[14px] font-semibold rounded-xl transition-all">
-            {Icons.refresh} Explain differently
-          </button>
-          <button onClick={handleUnderstood} disabled={understood}
-            className="flex items-center gap-2 px-6 py-3 text-white text-[14px] font-bold rounded-xl transition-all"
-            style={{ background: understood ? '#70AD47' : color }}>
-            {understood ? Icons.check : Icons.arrow}
-            {understood ? 'Moving to quiz...' : 'I understand — next'}
-          </button>
-        </div>
-      </div>
+<div className="bg-white border-t border-[#E4E7EC] sticky bottom-0"
+  style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+  <div className="max-w-[760px] mx-auto px-5 md:px-8 py-4 flex flex-col gap-2">
+    <div className="flex items-center justify-between gap-3">
+      <button onClick={handleExplainDifferently} disabled={currentLevel >= 4}
+        className="flex items-center gap-2 px-5 py-3 bg-[#F8FAFC] border border-[#E4E7EC] hover:border-[#5B9BD5] disabled:opacity-40 disabled:cursor-not-allowed text-[#475467] text-[14px] font-semibold rounded-xl transition-all">
+        {Icons.refresh} Explain differently
+      </button>
+      <button onClick={handleUnderstood} disabled={understood}
+        className="flex items-center gap-2 px-6 py-3 text-white text-[14px] font-bold rounded-xl transition-all"
+        style={{ background: understood ? '#70AD47' : color }}>
+        {understood ? Icons.check : Icons.arrow}
+        {understood ? 'Moving to quiz...' : 'I understand — next'}
+      </button>
+    </div>
+    {!understood && (
+      <button onClick={async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            await supabase.from('student_progress').upsert({
+              student_id: user.id,
+              topic_id: topicId,
+              level_reached: currentLevel,
+              is_stuck: true,
+              last_studied_at: new Date().toISOString(),
+            }, { onConflict: 'student_id,topic_id' });
+          }
+        } catch (err) { console.error(err); }
+        alert('Your teacher has been notified that you need help with this topic.');
+      }}
+        className="text-[12px] text-[#94A3B8] hover:text-[#BA1A1A] transition-colors text-center py-1">
+        I am stuck and need help with this topic
+      </button>
+    )}
+  </div>
+</div>
     </div>
   );
 }

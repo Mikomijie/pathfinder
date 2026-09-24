@@ -76,6 +76,12 @@ const Icons = {
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
     </svg>
   ),
+  trash: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+    </svg>
+  ),
 };
 
 const subjectConfig = [
@@ -93,7 +99,7 @@ Create an adaptive lesson about: "${topicTitle}" for subject: "${subject}"
 Return ONLY this exact JSON, no markdown, no backticks, no extra text:
 {"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps, each under 15 words)","level_4":"Think about this: one reflective question to check understanding","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point under 10 words"},{"label":"Step 2","text":"second key point under 10 words"},{"label":"Step 3","text":"third key point under 10 words"}]}}
 
-The level_3_visual type must be one of: "steps" (for processes), "compare" (for comparisons, returns items with "left" and "right" keys instead), "terms" (for key vocabulary, returns items with "term" and "definition" keys instead).
+The level_3_visual type must be one of: "steps" (for processes), "compare" (for comparisons, items have "left" and "right"), "terms" (for vocabulary, items have "term" and "definition").
 Pick whichever type best fits the topic.`;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -139,6 +145,8 @@ export default function Subjects({ profile, onNavigate }) {
   const [subjectLoading, setSubjectLoading] = useState(true);
   const [showDropdown, setShowDropdown] = useState(false);
   const [teacherTopics, setTeacherTopics] = useState([]);
+  const [myUploadedTopics, setMyUploadedTopics] = useState([]);
+  const [deletingId, setDeletingId] = useState(null);
 
   const isUniversity = profile?.student_level === 'university';
 
@@ -196,29 +204,74 @@ export default function Subjects({ profile, onNavigate }) {
       }
       setSubjectProgress(subMap);
 
-      // Fetch topics uploaded by teacher for this student's classes
-      const { data: memberData } = await supabase
-        .from('class_members')
-        .select('class_id')
-        .eq('student_id', user.id);
+      // Fetch teacher topics for secondary students
+      if (!isUniversity) {
+        const { data: memberData } = await supabase
+          .from('class_members')
+          .select('class_id')
+          .eq('student_id', user.id);
 
-      if (memberData && memberData.length > 0) {
-        const classIds = memberData.map(m => m.class_id);
+        if (memberData && memberData.length > 0) {
+          const classIds = memberData.map(m => m.class_id);
+          const { data: classTopics } = await supabase
+            .from('topics')
+            .select('*')
+            .in('class_id', classIds)
+            .is('deleted_at', null)
+            .order('created_at', { ascending: false });
+          setTeacherTopics(classTopics || []);
+        }
+      }
 
-        // Fetch topics linked to those classes
-        const { data: classTopics } = await supabase
+      // Fetch self-uploaded topics for university students
+      if (isUniversity) {
+        const { data: uploadedTopics } = await supabase
           .from('topics')
           .select('*')
-          .in('class_id', classIds)
+          .eq('student_id', user.id)
+          .eq('subject', 'Uploaded Notes')
+          .is('deleted_at', null)
           .order('created_at', { ascending: false });
+        setMyUploadedTopics(uploadedTopics || []);
 
-        setTeacherTopics(classTopics || []);
+        // Also fetch teacher topics if in a class
+        const { data: memberData } = await supabase
+          .from('class_members')
+          .select('class_id')
+          .eq('student_id', user.id);
+
+        if (memberData && memberData.length > 0) {
+          const classIds = memberData.map(m => m.class_id);
+          const { data: classTopics } = await supabase
+            .from('topics')
+            .select('*')
+            .in('class_id', classIds)
+            .is('deleted_at', null)
+            .order('created_at', { ascending: false });
+          setTeacherTopics(classTopics || []);
+        }
       }
 
     } catch (err) {
       console.error(err);
     } finally {
       setSubjectLoading(false);
+    }
+  };
+
+  const handleDeleteTopic = async (topicId) => {
+    if (!window.confirm('Delete this lesson? This cannot be undone.')) return;
+    setDeletingId(topicId);
+    try {
+      await supabase
+        .from('topics')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', topicId);
+      setMyUploadedTopics(prev => prev.filter(t => t.id !== topicId));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -229,6 +282,7 @@ export default function Subjects({ profile, onNavigate }) {
         .from('topics')
         .select('*')
         .ilike('title', `%${q}%`)
+        .is('deleted_at', null)
         .limit(8);
       setResults(data || []);
       setShowDropdown(true);
@@ -343,8 +397,8 @@ export default function Subjects({ profile, onNavigate }) {
         </h1>
         <p className="text-[14px] text-[#475467] mt-1">
           {isUniversity
-            ? 'Search any topic or upload your lecture notes.'
-            : 'Search any topic or pick a subject to continue learning.'}
+            ? 'Search any topic, upload notes, or study your saved lessons.'
+            : 'Pick a subject, search any topic, or study your teacher\'s materials.'}
         </p>
       </div>
 
@@ -356,7 +410,9 @@ export default function Subjects({ profile, onNavigate }) {
           <span className="text-[#94A3B8] flex-shrink-0">{Icons.search}</span>
           <input
             type="text"
-            placeholder="Search any topic... e.g. Simultaneous Equations, Photography"
+            placeholder={isUniversity
+              ? 'Search any topic — Chemistry, History, Law, anything...'
+              : 'Search any topic — Algebra, Geography, Government, anything...'}
             value={query}
             onChange={e => { setQuery(e.target.value); setGenerateError(''); }}
             onFocus={() => query.length >= 2 && setShowDropdown(true)}
@@ -364,15 +420,20 @@ export default function Subjects({ profile, onNavigate }) {
           />
           {query && (
             <button onClick={() => { setQuery(''); setShowDropdown(false); setGenerateError(''); }}
-              className="text-[#94A3B8] hover:text-[#475467] flex-shrink-0">
-              {Icons.close}
-            </button>
+              className="text-[#94A3B8] hover:text-[#475467] flex-shrink-0">{Icons.close}</button>
           )}
           {searching && (
             <div className="w-4 h-4 rounded-full border-2 border-[#E4E7EC] flex-shrink-0"
               style={{ borderTopColor: '#5B9BD5', animation: 'spin 1s linear infinite' }}/>
           )}
         </div>
+
+        {/* SEARCH HINT */}
+        {!query && !isUniversity && (
+          <p className="text-[12px] text-[#94A3B8] mt-2 px-1">
+            You can search beyond Mathematics, English and Science — try Geography, Civic Education, Agriculture, or anything you are studying.
+          </p>
+        )}
 
         {/* DROPDOWN */}
         {showDropdown && (
@@ -406,9 +467,7 @@ export default function Subjects({ profile, onNavigate }) {
                 })}
                 <button onClick={handleGenerate} disabled={generating}
                   className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-[#EFF6FF] transition-colors text-left border-t border-[#E4E7EC]">
-                  <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">
-                    {Icons.spark}
-                  </div>
+                  <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">{Icons.spark}</div>
                   <div className="flex-1">
                     <p className="text-[14px] font-semibold text-[#136299]">
                       {generating ? 'Generating lesson...' : `Generate lesson on "${query}"`}
@@ -424,9 +483,7 @@ export default function Subjects({ profile, onNavigate }) {
                 </p>
                 <button onClick={handleGenerate} disabled={generating}
                   className="w-full flex items-center gap-3 p-4 bg-[#F8FAFC] hover:bg-[#EFF6FF] border border-[#E4E7EC] hover:border-[#5B9BD5] rounded-xl transition-all text-left">
-                  <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">
-                    {Icons.spark}
-                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">{Icons.spark}</div>
                   <div>
                     <p className="text-[14px] font-bold text-[#136299]">
                       {generating ? 'Generating your lesson...' : `Generate "${query}"`}
@@ -439,7 +496,6 @@ export default function Subjects({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* GENERATING STATE */}
         {generating && (
           <div className="mt-3 bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl p-4 flex items-center gap-3">
             <div className="w-5 h-5 rounded-full border-2 border-[#BFDBFE] flex-shrink-0"
@@ -451,7 +507,6 @@ export default function Subjects({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* ERROR */}
         {generateError && !generating && (
           <div className="mt-3 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl p-4 flex items-center gap-3">
             <button onClick={() => setGenerateError('')} className="text-[#BA1A1A] flex-shrink-0">{Icons.close}</button>
@@ -459,7 +514,6 @@ export default function Subjects({ profile, onNavigate }) {
           </div>
         )}
 
-        {/* RECENT SEARCHES */}
         {!showDropdown && recentSearches.length > 0 && !query && (
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-widest self-center">Recent:</span>
@@ -476,17 +530,12 @@ export default function Subjects({ profile, onNavigate }) {
       {/* UNIVERSITY UPLOAD CTA */}
       {isUniversity && (
         <div className="f2 bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-6 flex flex-col sm:flex-row items-center gap-4 hover:border-[#5B9BD5] transition-colors">
-          <div className="w-12 h-12 rounded-2xl bg-[#EFF6FF] flex items-center justify-center text-[#136299] flex-shrink-0">
-            {Icons.upload}
-          </div>
+          <div className="w-12 h-12 rounded-2xl bg-[#EFF6FF] flex items-center justify-center text-[#136299] flex-shrink-0">{Icons.upload}</div>
           <div className="flex-1 text-center sm:text-left">
             <h3 className="text-[15px] font-bold text-[#0F172A]">Upload Lecture Notes</h3>
-            <p className="text-[13px] text-[#475467] mt-0.5">
-              Upload a PDF or paste notes — we break them into adaptive micro-lessons.
-            </p>
+            <p className="text-[13px] text-[#475467] mt-0.5">Upload a PDF or paste notes — we break them into adaptive micro-lessons.</p>
           </div>
-          <button
-            onClick={() => onNavigate && onNavigate('upload')}
+          <button onClick={() => onNavigate && onNavigate('upload')}
             className="flex items-center gap-2 px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[13px] font-bold rounded-xl transition-colors flex-shrink-0">
             Upload {Icons.arrow}
           </button>
@@ -507,26 +556,20 @@ export default function Subjects({ profile, onNavigate }) {
             {teacherTopics.map((topic, i) => {
               const p = progress[topic.id];
               return (
-                <button key={i}
-                  onClick={() => navigate(`/lesson/${topic.id}`)}
+                <button key={i} onClick={() => navigate(`/lesson/${topic.id}`)}
                   className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3 hover:border-[#70AD47] hover:shadow-sm transition-all text-left active:scale-[0.99]">
-                  <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">
-                    {Icons.book}
-                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">{Icons.book}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[14px] font-semibold text-[#0F172A] truncate">{topic.title}</p>
-                    <p className="text-[12px] text-[#94A3B8] mt-0.5">
-                      {topic.subject || 'Uploaded Notes'} · 4 explanation levels
-                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[11px] font-semibold text-[#70AD47] bg-[#F0FDF4] px-2 py-0.5 rounded-full">Teacher</span>
+                      <p className="text-[11px] text-[#94A3B8]">4 explanation levels</p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {p?.completed && (
-                      <span className="text-[#70AD47]">{Icons.check}</span>
-                    )}
+                    {p?.completed && <span className="text-[#70AD47]">{Icons.check}</span>}
                     {p && !p.completed && (
-                      <span className="text-[11px] font-semibold text-[#F59E0B] bg-[#FFFBEB] px-2 py-0.5 rounded-full">
-                        In progress
-                      </span>
+                      <span className="text-[11px] font-semibold text-[#F59E0B] bg-[#FFFBEB] px-2 py-0.5 rounded-full">In progress</span>
                     )}
                     <span className="text-[#70AD47]">{Icons.arrow}</span>
                   </div>
@@ -537,12 +580,51 @@ export default function Subjects({ profile, onNavigate }) {
         </div>
       )}
 
-      {/* SUBJECT CARDS */}
+      {/* MY UPLOADED LESSONS (university) */}
+      {isUniversity && myUploadedTopics.length > 0 && (
+        <div className="f3">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-[#136299]">{Icons.file}</div>
+            <h2 className="text-[14px] font-bold text-[#0F172A]">My Uploaded Notes</h2>
+            <span className="text-[11px] font-semibold text-[#94A3B8] bg-[#F1F5F9] px-2 py-0.5 rounded-full">
+              {myUploadedTopics.length} lesson{myUploadedTopics.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {myUploadedTopics.map((topic, i) => {
+              const p = progress[topic.id];
+              return (
+                <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+                  <button onClick={() => navigate(`/lesson/${topic.id}`)}
+                    className="flex items-center gap-3 flex-1 text-left min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#136299] flex-shrink-0">{Icons.file}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-semibold text-[#0F172A] truncate">{topic.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[11px] font-semibold text-[#136299] bg-[#EFF6FF] px-2 py-0.5 rounded-full">Mine</span>
+                        <p className="text-[11px] text-[#94A3B8]">
+                          {p?.completed ? 'Completed' : p?.level_reached ? `Level ${p.level_reached} of 4` : 'Not started'}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTopic(topic.id)}
+                    disabled={deletingId === topic.id}
+                    className="text-[#94A3B8] hover:text-[#BA1A1A] transition-colors p-1 flex-shrink-0">
+                    {Icons.trash}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SUBJECT CARDS — secondary students */}
       {!isUniversity && (
         <div className="f3 flex flex-col gap-3">
-          <h2 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">
-            Or browse by subject
-          </h2>
+          <h2 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Or browse by subject</h2>
           {subjectLoading ? (
             [1,2,3].map(i => (
               <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
@@ -566,14 +648,10 @@ export default function Subjects({ profile, onNavigate }) {
                   className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left active:scale-[0.99]">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-                      style={{ background: s.bg, color: s.color }}>
-                      {s.icon}
-                    </div>
+                      style={{ background: s.bg, color: s.color }}>{s.icon}</div>
                     <div>
                       <h3 className="text-[15px] font-bold text-[#0F172A]">{s.key}</h3>
-                      <p className="text-[12px] text-[#94A3B8] mt-0.5">
-                        {sp.done} of {sp.total} topics complete
-                      </p>
+                      <p className="text-[12px] text-[#94A3B8] mt-0.5">{sp.done} of {sp.total} topics complete</p>
                       <div className="mt-1.5 bg-[#F1F5F9] rounded-full h-1.5 w-[120px]">
                         <div className="h-1.5 rounded-full progress-bar"
                           style={{ width: `${sp.progress}%`, background: s.color }}/>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../supabaseClient';
+import { generateFlashcards } from '../../../services/openrouter';
 
 const Icons = {
   back: (
@@ -42,12 +43,6 @@ const Icons = {
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
     </svg>
   ),
-  lock: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="3" y="11" width="18" height="11" rx="2"/>
-      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
-  ),
 };
 
 const subjectColor = {
@@ -56,7 +51,6 @@ const subjectColor = {
   'Basic Science': '#F59E0B',
 };
 
-// Hardcoded flashcards per topic
 const TopicFlashcards = {
   'Introduction to Fractions': [
     { front: 'What is a fraction?', back: 'A fraction is a part of a whole, written as one number over another.' },
@@ -135,10 +129,9 @@ export default function Flashcards() {
   const [studyMore, setStudyMore] = useState([]);
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [hasProgress, setHasProgress] = useState(false);
-
-  const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
 
   useEffect(() => {
     fetchTopic();
@@ -151,7 +144,6 @@ export default function Flashcards() {
         .from('topics').select('*').eq('id', topicId).single();
       setTopic(topicData);
 
-      // Check if student has started this lesson (gate access)
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: progressData } = await supabase
@@ -163,25 +155,46 @@ export default function Flashcards() {
         setHasProgress(!!(progressData?.level_reached > 0));
       }
 
-      // Load flashcards — hardcoded first, then fallback to generic
       const hardcoded = TopicFlashcards[topicData?.title];
       if (hardcoded) {
         setCards(hardcoded);
       } else {
-        // Generic flashcards from lesson content
+        // AI-generated topic — use generateFlashcards from OpenRouter
         const { data: lessonData } = await supabase
-          .from('lessons').select('level_1').eq('topic_id', topicId).single();
+          .from('lessons').select('level_1, level_2').eq('topic_id', topicId).single();
+
         if (lessonData?.level_1) {
-          // Create simple cards from lesson text
-          const sentences = lessonData.level_1
-            .split('. ')
-            .filter(s => s.length > 20)
-            .slice(0, 5);
-          const generatedCards = sentences.map((s, i) => ({
-            front: `Key point ${i + 1} from ${topicData?.title}`,
-            back: s.trim() + (s.endsWith('.') ? '' : '.'),
-          }));
-          setCards(generatedCards.length > 0 ? generatedCards : []);
+          setGenerating(true);
+          try {
+            const aiCards = await generateFlashcards(
+              topicData?.title,
+              lessonData.level_1 + ' ' + (lessonData.level_2 || '')
+            );
+            if (aiCards && aiCards.length > 0) {
+              setCards(aiCards.map(c => ({ front: c.front, back: c.back })));
+            } else {
+              // Final fallback — split lesson into sentences
+              const sentences = lessonData.level_1
+                .split('. ')
+                .filter(s => s.length > 20)
+                .slice(0, 5);
+              setCards(sentences.map((s, i) => ({
+                front: `Key point ${i + 1} — ${topicData?.title}`,
+                back: s.trim() + (s.endsWith('.') ? '' : '.'),
+              })));
+            }
+          } catch {
+            const sentences = lessonData.level_1
+              .split('. ')
+              .filter(s => s.length > 20)
+              .slice(0, 5);
+            setCards(sentences.map((s, i) => ({
+              front: `Key point ${i + 1} — ${topicData?.title}`,
+              back: s.trim() + (s.endsWith('.') ? '' : '.'),
+            })));
+          } finally {
+            setGenerating(false);
+          }
         }
       }
     } catch (err) {
@@ -199,6 +212,7 @@ export default function Flashcards() {
 
   const handleVoice = (e, text) => {
     e.stopPropagation();
+    const voiceSpeed = parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
     if (speaking) {
       window.speechSynthesis.cancel();
       setSpeaking(false);
@@ -220,13 +234,11 @@ export default function Flashcards() {
     setFlipped(false);
     setSpeaking(false);
     window.speechSynthesis?.cancel();
-
     if (isKnown) {
       setKnown(prev => [...prev, currentCard]);
     } else {
       setStudyMore(prev => [...prev, currentCard]);
     }
-
     setTimeout(() => {
       if (currentCard < cards.length - 1) {
         setCurrentCard(prev => prev + 1);
@@ -246,7 +258,6 @@ export default function Flashcards() {
   };
 
   const handleRestartStudyMore = () => {
-    // Only review cards marked "study more" — spaced repetition
     const studyMoreCards = studyMore.map(i => cards[i]);
     setCards(studyMoreCards);
     setCurrentCard(0);
@@ -262,23 +273,35 @@ export default function Flashcards() {
   const knownCount = known.length;
   const remaining = cards.length - currentCard - 1;
 
-  if (loading) {
+  if (loading || generating) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
-        <p className="text-[14px] text-[#475467]">Loading flashcards...</p>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+          * { font-family: 'Plus Jakarta Sans', sans-serif; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-[#E4E7EC]"
+            style={{ borderTopColor: color, animation: 'spin 1s linear infinite' }}/>
+          <p className="text-[14px] text-[#475467]">
+            {generating ? 'Creating your flashcards...' : 'Loading flashcards...'}
+          </p>
+        </div>
       </div>
     );
   }
 
-  // GATE — must start lesson first
   if (!hasProgress) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
         <div className="text-center max-w-[380px]">
           <div className="w-16 h-16 rounded-2xl bg-[#F8FAFC] border border-[#E4E7EC] flex items-center justify-center mx-auto mb-5 text-[#94A3B8]">
-            {Icons.lock}
+            <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <rect x="3" y="11" width="18" height="11" rx="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
           </div>
           <h2 className="text-[20px] font-extrabold text-[#0F172A] mb-2">Start the lesson first</h2>
           <p className="text-[14px] text-[#475467] leading-[1.7] mb-6">
@@ -310,7 +333,6 @@ export default function Flashcards() {
     );
   }
 
-  // FINISHED SCREEN
   if (finished) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-5">
@@ -325,7 +347,6 @@ export default function Flashcards() {
           .pop { animation: pop 0.5s cubic-bezier(0.4,0,0.2,1) forwards; }
         `}</style>
         <div className="text-center max-w-[440px] w-full">
-
           <div className="pop w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 border-4"
             style={{ borderColor: color, background: `${color}15` }}>
             <div>
@@ -374,7 +395,6 @@ export default function Flashcards() {
     );
   }
 
-  // FLASHCARD SCREEN
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col">
       <style>{`
@@ -399,7 +419,6 @@ export default function Flashcards() {
         .fade { animation: fadeUp 0.4s ease forwards; }
       `}</style>
 
-      {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[620px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
           <button onClick={() => { window.speechSynthesis?.cancel(); navigate('/dashboard/student'); }}
@@ -426,8 +445,6 @@ export default function Flashcards() {
       </header>
 
       <div className="flex-1 max-w-[560px] mx-auto w-full px-5 md:px-8 py-8 flex flex-col gap-5">
-
-        {/* HEADER */}
         <div className="fade">
           <p className="text-[11px] font-bold uppercase tracking-widest mb-1" style={{ color }}>
             {topic?.subject} · Flashcards
@@ -438,12 +455,9 @@ export default function Flashcards() {
           </p>
         </div>
 
-        {/* CARD */}
         <div className="card-wrap" style={{ height: '300px' }}>
           <div className={`card-inner ${flipped ? 'flipped' : ''}`}
             onClick={handleFlip} style={{ cursor: 'pointer' }}>
-
-            {/* FRONT */}
             <div className="card-front bg-white border-2 shadow-lg shadow-black/5"
               style={{ borderColor: color }}>
               <p className="text-[10px] font-bold uppercase tracking-widest mb-4 opacity-60" style={{ color }}>
@@ -461,7 +475,6 @@ export default function Flashcards() {
               <p className="text-[11px] text-[#94A3B8] mt-4 absolute bottom-5">tap to flip</p>
             </div>
 
-            {/* BACK — dark navy */}
             <div className="card-back bg-[#0F172A] border-2 border-[#1E293B] shadow-lg shadow-black/20">
               <p className="text-[10px] font-bold uppercase tracking-widest mb-4 opacity-40 text-white">
                 Answer
@@ -478,7 +491,6 @@ export default function Flashcards() {
           </div>
         </div>
 
-        {/* ACTION BUTTONS — show after flipping */}
         {flipped ? (
           <div className="flex gap-3 fade">
             <button onClick={() => nextCard(false)}
@@ -497,7 +509,6 @@ export default function Flashcards() {
           </div>
         )}
 
-        {/* TIP */}
         <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl px-5 py-3 flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-[#70AD47] flex-shrink-0"/>
           <p className="text-[13px] text-[#1E293B] leading-[1.6]">
@@ -506,7 +517,6 @@ export default function Flashcards() {
               : 'Mark cards you know. The ones you study more will come back for review.'}
           </p>
         </div>
-
       </div>
     </div>
   );

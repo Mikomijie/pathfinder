@@ -29,12 +29,6 @@ const Icons = {
       <path d="M3 8h10M9 4l4 4-4 4"/>
     </svg>
   ),
-  lock: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="3" y="11" width="18" height="11" rx="2"/>
-      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
-  ),
   math: (
     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -52,6 +46,12 @@ const Icons = {
       <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v11l-5 5m5-5h6m0 0l5 5M15 14V3"/>
     </svg>
   ),
+  file: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+  ),
 };
 
 const subjectIcons = {
@@ -67,6 +67,7 @@ export default function Progress({ profile }) {
   const [topicProgress, setTopicProgress] = useState({});
   const [allTopics, setAllTopics] = useState({});
   const [recentActivity, setRecentActivity] = useState([]);
+  const [aiTopicsProgress, setAiTopicsProgress] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const isUniversity = profile?.student_level === 'university';
@@ -91,13 +92,11 @@ export default function Progress({ profile }) {
         return;
       }
 
-      // Stats
       const completed = progressData.filter(p => p.completed).length;
       const scores = progressData.filter(p => p.score > 0).map(p => p.score);
       const avgScore = scores.length > 0
         ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
 
-      // Streak
       const completedDates = progressData
         .filter(p => p.completed && p.last_studied_at)
         .map(p => new Date(p.last_studied_at).toDateString());
@@ -112,21 +111,26 @@ export default function Progress({ profile }) {
       }
 
       setStats({ completed, streak, avgScore });
-      setRecentActivity(progressData.slice(0, 6));
+      setRecentActivity(progressData.slice(0, 8));
 
-      // Progress map
       const pMap = {};
       progressData.forEach(p => { pMap[p.topic_id] = p; });
       setTopicProgress(pMap);
 
+      // AI-generated and uploaded topics — not in the 3 pre-built subjects
+      const prebuiltSubjects = subjectConfig.map(s => s.key);
+      const aiTopics = progressData.filter(p =>
+        p.topics && !prebuiltSubjects.includes(p.topics.subject)
+      );
+      setAiTopicsProgress(aiTopics);
+
       if (!isUniversity) {
-        // Fetch all topics per subject
         const topicsPerSubject = {};
         const subMap = {};
-
         for (const s of subjectConfig) {
           const { data: topics } = await supabase
-            .from('topics').select('*').eq('subject', s.key).order('order_index');
+            .from('topics').select('*').eq('subject', s.key)
+            .is('deleted_at', null).order('order_index');
           topicsPerSubject[s.key] = topics || [];
           const total = topics?.length || 0;
           const done = progressData.filter(p =>
@@ -149,15 +153,11 @@ export default function Progress({ profile }) {
     }
   };
 
-  const getTopicStatus = (topic, topics) => {
+  const getTopicStatus = (topic) => {
     const p = topicProgress[topic.id];
     if (p?.completed) return 'completed';
     if (p?.level_reached > 0) return 'inprogress';
-    const index = topics.findIndex(t => t.id === topic.id);
-    if (index === 0) return 'available';
-    const prev = topics[index - 1];
-    if (prev && (topicProgress[prev.id]?.completed || topicProgress[prev.id]?.level_reached >= 3)) return 'available';
-    return 'upcoming';
+    return 'available'; // No locking — all topics accessible
   };
 
   if (loading) {
@@ -196,7 +196,6 @@ export default function Progress({ profile }) {
         .pulse { animation: pulse 2s ease infinite; }
       `}</style>
 
-      {/* HEADER */}
       <div className="f1">
         <h1 className="text-[24px] font-extrabold text-[#0F172A]">My Progress</h1>
         <p className="text-[14px] text-[#475467] mt-1">A calm view of how far you have come.</p>
@@ -245,14 +244,13 @@ export default function Progress({ profile }) {
           </p>
           <button
             onClick={() => navigate(isUniversity ? '/dashboard/student' : '/topics/Mathematics')}
-            className="px-6 py-2.5 bg-[#136299] text-white text-[13px] font-bold rounded-xl hover:bg-[#0F4F7A] transition-colors"
-          >
+            className="px-6 py-2.5 bg-[#136299] text-white text-[13px] font-bold rounded-xl hover:bg-[#0F4F7A] transition-colors">
             {isUniversity ? 'Go to Dashboard' : 'Start First Lesson'}
           </button>
         </div>
       )}
 
-      {/* VISUAL JOURNEY MAP — secondary only */}
+      {/* VISUAL JOURNEY MAP — secondary only, pre-built subjects */}
       {!isUniversity && stats.completed > 0 && Object.keys(allTopics).length > 0 && (
         <div className="f3 flex flex-col gap-5">
           <h2 className="text-[15px] font-bold text-[#0F172A]">Your Learning Journey</h2>
@@ -263,7 +261,6 @@ export default function Progress({ profile }) {
 
             return (
               <div key={s.key} className="bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-6">
-                {/* Subject header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -278,66 +275,48 @@ export default function Progress({ profile }) {
                   <span className="text-[13px] font-bold" style={{ color: s.color }}>{sp.progress}%</span>
                 </div>
 
-                {/* Progress bar */}
                 <div className="bg-[#F1F5F9] rounded-full h-2 mb-4">
                   <div className="h-2 rounded-full progress-bar"
                     style={{ width: `${sp.progress}%`, background: s.color }}/>
                 </div>
 
-                {/* Visual path */}
                 <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
                   {topics.map((topic, i) => {
-                    const status = getTopicStatus(topic, topics);
+                    const status = getTopicStatus(topic);
                     return (
                       <React.Fragment key={topic.id}>
                         <button
-                          onClick={() => status !== 'upcoming' && navigate(`/lesson/${topic.id}`)}
+                          onClick={() => navigate(`/lesson/${topic.id}`)}
                           title={topic.title}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold transition-all ${
-                            status === 'upcoming' ? 'cursor-not-allowed' : 'cursor-pointer hover:scale-110'
-                          }`}
+                          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold transition-all cursor-pointer hover:scale-110"
                           style={
                             status === 'completed'
                               ? { background: s.color, color: 'white' }
-                              : status === 'inprogress' || status === 'available'
+                              : status === 'inprogress'
                               ? { background: s.bg, color: s.color, border: `2px solid ${s.color}` }
-                              : { background: '#F1F5F9', color: '#94A3B8' }
-                          }
-                        >
-                          {status === 'completed'
-                            ? Icons.check
-                            : status === 'upcoming'
-                            ? Icons.lock
-                            : i + 1}
+                              : { background: '#F1F5F9', color: '#94A3B8', border: '2px solid #E4E7EC' }
+                          }>
+                          {status === 'completed' ? Icons.check : i + 1}
                         </button>
                         {i < topics.length - 1 && (
                           <div className="flex-1 h-0.5 rounded-full flex-shrink-0 min-w-[8px]"
-                            style={{
-                              background: status === 'completed' ? s.color : '#E4E7EC'
-                            }}/>
+                            style={{ background: status === 'completed' ? s.color : '#E4E7EC' }}/>
                         )}
                       </React.Fragment>
                     );
                   })}
                 </div>
 
-                {/* Topic list */}
                 <div className="flex flex-col gap-2">
                   {topics.map((topic, i) => {
-                    const status = getTopicStatus(topic, topics);
+                    const status = getTopicStatus(topic);
                     const p = topicProgress[topic.id];
-                    const isCurrent = status === 'inprogress' || status === 'available';
+                    const isCurrent = status === 'inprogress';
 
                     return (
-                      <div
-                        key={topic.id}
-                        onClick={() => status !== 'upcoming' && navigate(`/lesson/${topic.id}`)}
-                        className={`flex items-center gap-3 p-3 rounded-xl transition-all ${
-                          status === 'upcoming'
-                            ? 'opacity-40 cursor-not-allowed'
-                            : 'cursor-pointer hover:bg-[#F8FAFC]'
-                        } ${isCurrent ? 'bg-[#F8FAFC]' : ''}`}
-                      >
+                      <div key={topic.id}
+                        onClick={() => navigate(`/lesson/${topic.id}`)}
+                        className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all hover:bg-[#F8FAFC] ${isCurrent ? 'bg-[#F8FAFC]' : ''}`}>
                         <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
                           style={
                             status === 'completed'
@@ -346,20 +325,16 @@ export default function Progress({ profile }) {
                               ? { background: s.bg, color: s.color }
                               : { background: '#F1F5F9', color: '#94A3B8' }
                           }>
-                          {status === 'completed' ? Icons.check : status === 'upcoming' ? Icons.lock : i + 1}
+                          {status === 'completed' ? Icons.check : i + 1}
                         </div>
                         <div className="flex-1">
-                          <p className={`text-[13px] font-semibold ${
-                            status === 'upcoming' ? 'text-[#94A3B8]' : 'text-[#0F172A]'
-                          }`}>{topic.title}</p>
+                          <p className="text-[13px] font-semibold text-[#0F172A]">{topic.title}</p>
                           <p className="text-[11px] text-[#94A3B8]">
                             {status === 'completed'
                               ? `Completed${p?.score ? ` · ${p.score}%` : ''}`
                               : status === 'inprogress'
                               ? `Level ${p?.level_reached} of 4 · In progress`
-                              : status === 'available'
-                              ? 'Ready to start'
-                              : 'Locked'}
+                              : 'Ready to start'}
                           </p>
                         </div>
                         {isCurrent && (
@@ -368,9 +343,7 @@ export default function Progress({ profile }) {
                             Current
                           </span>
                         )}
-                        {status !== 'upcoming' && (
-                          <span style={{ color: s.color }}>{Icons.arrow}</span>
-                        )}
+                        <span style={{ color: s.color }}>{Icons.arrow}</span>
                       </div>
                     );
                   })}
@@ -381,8 +354,86 @@ export default function Progress({ profile }) {
         </div>
       )}
 
+      {/* AI-GENERATED TOPICS PROGRESS */}
+      {!isUniversity && aiTopicsProgress.length > 0 && (
+        <div className="f3 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#136299]">
+              {Icons.star}
+            </div>
+            <div>
+              <p className="text-[14px] font-bold text-[#0F172A]">AI-Generated Lessons</p>
+              <p className="text-[12px] text-[#94A3B8]">{aiTopicsProgress.filter(p => p.completed).length} of {aiTopicsProgress.length} complete</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {aiTopicsProgress.map((p, i) => (
+              <div key={i}
+                onClick={() => navigate(`/lesson/${p.topic_id}`)}
+                className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-[#F8FAFC] transition-all">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+                  style={p.completed
+                    ? { background: '#5B9BD5', color: 'white' }
+                    : { background: '#EFF6FF', color: '#5B9BD5' }}>
+                  {p.completed ? Icons.check : i + 1}
+                </div>
+                <div className="flex-1">
+                  <p className="text-[13px] font-semibold text-[#0F172A]">{p.topics?.title}</p>
+                  <p className="text-[11px] text-[#94A3B8]">
+                    {p.completed
+                      ? `Completed${p.score ? ` · ${p.score}%` : ''}`
+                      : `Level ${p.level_reached} of 4 · In progress`}
+                  </p>
+                </div>
+                <span className="text-[#5B9BD5]">{Icons.arrow}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* UNIVERSITY: ALL LESSONS */}
+      {isUniversity && recentActivity.length > 0 && (
+        <div className="f3 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-6">
+          <h2 className="text-[15px] font-bold text-[#0F172A] mb-4">All Lessons</h2>
+          <div className="flex flex-col gap-2">
+            {recentActivity.map((p, i) => {
+              const isUploaded = p.topics?.subject === 'Uploaded Notes';
+              const color = isUploaded ? '#136299' : '#5B9BD5';
+              const bg = isUploaded ? '#EFF6FF' : '#EFF6FF';
+              return (
+                <div key={i}
+                  onClick={() => navigate(`/lesson/${p.topic_id}`)}
+                  className="flex items-center gap-3 p-3 bg-[#F8FAFC] rounded-xl cursor-pointer hover:bg-[#F1F5F9] transition-colors">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+                    style={{ background: bg, color }}>
+                    {isUploaded ? Icons.file : Icons.star}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-semibold text-[#0F172A]">{p.topics?.title || 'Unknown topic'}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: bg, color }}>
+                        {isUploaded ? 'My Notes' : 'AI Lesson'}
+                      </span>
+                      <p className="text-[11px] text-[#94A3B8]">
+                        {p.completed ? 'Completed' : `Level ${p.level_reached} of 4`}
+                        {p.score > 0 && ` · ${p.score}%`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={p.completed ? 'text-[#70AD47]' : 'text-[#94A3B8]'}>
+                    {p.completed ? Icons.check : Icons.arrow}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* RECENT ACTIVITY */}
-      {recentActivity.length > 0 && (
+      {!isUniversity && recentActivity.length > 0 && (
         <div className="f4 bg-white border border-[#E4E7EC] rounded-2xl p-6">
           <h2 className="text-[15px] font-bold text-[#0F172A] mb-4">Recent Activity</h2>
           <div className="flex flex-col gap-3">
@@ -401,9 +452,7 @@ export default function Progress({ profile }) {
                     {p.topics?.subject?.[0] || '?'}
                   </div>
                   <div className="flex-1">
-                    <p className="text-[13px] font-semibold text-[#0F172A]">
-                      {p.topics?.title || 'Unknown topic'}
-                    </p>
+                    <p className="text-[13px] font-semibold text-[#0F172A]">{p.topics?.title || 'Unknown topic'}</p>
                     <p className="text-[11px] text-[#94A3B8]">
                       {p.completed ? 'Completed' : `Level ${p.level_reached} of 4`}
                       {p.score > 0 && ` · Score: ${p.score}%`}

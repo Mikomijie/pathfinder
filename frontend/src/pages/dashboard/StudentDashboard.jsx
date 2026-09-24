@@ -119,6 +119,10 @@ export default function StudentDashboard() {
         setProfileError(true);
       } else {
         setProfile(data);
+        // Sync voice speed from profile to localStorage
+        if (data?.voice_speed) {
+          localStorage.setItem('pathfinder_voice_speed', data.voice_speed.toString());
+        }
       }
     } catch (err) {
       console.error(err);
@@ -183,7 +187,6 @@ export default function StudentDashboard() {
     );
   }
 
-  // Profile error state — friendly recovery
   if (profileError) {
     return (
       <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center px-6">
@@ -227,13 +230,11 @@ export default function StudentDashboard() {
         * { font-family: 'Plus Jakarta Sans', sans-serif; }
       `}</style>
 
-      {/* SIDEBAR OVERLAY */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden"
           onClick={() => setSidebarOpen(false)}/>
       )}
 
-      {/* SIDEBAR */}
       {!focusMode && (
         <aside className={`
           fixed md:sticky top-0 left-0 h-screen w-[240px] bg-white border-r border-[#E4E7EC]
@@ -280,7 +281,6 @@ export default function StudentDashboard() {
         </aside>
       )}
 
-      {/* MAIN */}
       <div className="flex-1 flex flex-col min-h-screen">
         <header className="h-[60px] bg-white border-b border-[#E4E7EC] flex items-center justify-between px-5 md:px-8 sticky top-0 z-20">
           <div className="flex items-center gap-3">
@@ -317,13 +317,26 @@ export default function StudentDashboard() {
 
 function Settings({ profile, focusMode, setFocusMode, onLogout }) {
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
-  const [voiceSpeed, setVoiceSpeedState] = useState(
-    parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75')
-  );
 
-  const handleVoiceSpeed = (speed) => {
+  // Read from profile first, fall back to localStorage
+  const savedSpeed = profile?.voice_speed
+    || parseFloat(localStorage.getItem('pathfinder_voice_speed') || '0.75');
+  const [voiceSpeed, setVoiceSpeedState] = useState(savedSpeed);
+
+  const handleVoiceSpeed = async (speed) => {
     setVoiceSpeedState(speed);
     localStorage.setItem('pathfinder_voice_speed', speed.toString());
+    // Save to Supabase so it syncs across devices
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('profiles')
+          .update({ voice_speed: speed })
+          .eq('id', user.id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -351,7 +364,6 @@ function Settings({ profile, focusMode, setFocusMode, onLogout }) {
         <div className="pt-4 border-t border-[#F1F5F9]">
           <h3 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Accessibility</h3>
 
-          {/* Focus Mode */}
           <div className="flex items-center justify-between py-3 border-b border-[#F1F5F9]">
             <div>
               <p className="text-[14px] font-semibold text-[#1E293B]">Focus Mode</p>
@@ -364,11 +376,10 @@ function Settings({ profile, focusMode, setFocusMode, onLogout }) {
             </button>
           </div>
 
-          {/* Voice Speed */}
           <div className="flex items-center justify-between py-3">
             <div>
               <p className="text-[14px] font-semibold text-[#1E293B]">Voice Speed</p>
-              <p className="text-[12px] text-[#94A3B8]">How fast lessons are read aloud</p>
+              <p className="text-[12px] text-[#94A3B8]">Syncs across all your devices</p>
             </div>
             <div className="flex items-center gap-2">
               {[

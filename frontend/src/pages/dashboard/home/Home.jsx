@@ -87,6 +87,11 @@ const Icons = {
       <polyline points="14 2 14 8 20 8"/>
     </svg>
   ),
+  close: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
 };
 
 const subjectConfig = [
@@ -119,12 +124,15 @@ export default function Home({ profile, onNavigate }) {
   const navigate = useNavigate();
   const [greeting, setGreeting] = useState('');
   const [tip, setTip] = useState('');
+  const [showTip, setShowTip] = useState(true);
   const [stats, setStats] = useState({ completed: 0, avgScore: 0, streak: 0 });
   const [nextIncompleteTopic, setNextIncompleteTopic] = useState(null);
-  const [lastTopic, setLastTopic] = useState(null);
+  const [lastStudiedTopic, setLastStudiedTopic] = useState(null);
   const [subjectProgress, setSubjectProgress] = useState({});
   const [subjectLoading, setSubjectLoading] = useState(true);
   const [uploadedLessons, setUploadedLessons] = useState([]);
+  const [allUploadedLessons, setAllUploadedLessons] = useState([]);
+  const [showAllUploaded, setShowAllUploaded] = useState(false);
   const [classCode, setClassCode] = useState('');
   const [joiningClass, setJoiningClass] = useState(false);
   const [classJoined, setClassJoined] = useState(false);
@@ -174,6 +182,7 @@ export default function Home({ profile, onNavigate }) {
       const avgScore = scores.length > 0
         ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
 
+      // Streak — count consecutive days with completed topics
       const completedDates = progressData
         .filter(p => p.completed && p.last_studied_at)
         .map(p => new Date(p.last_studied_at).toDateString());
@@ -188,7 +197,10 @@ export default function Home({ profile, onNavigate }) {
       }
 
       setStats({ completed, avgScore, streak });
-      setLastTopic(progressData[0]);
+
+      // Last studied topic — most recently interacted with
+      const lastProgress = progressData[0];
+      if (lastProgress) setLastStudiedTopic(lastProgress);
 
       if (!isUniversity) {
         const allTopics = await Promise.all(
@@ -200,7 +212,22 @@ export default function Home({ profile, onNavigate }) {
         const progressMap = {};
         progressData.forEach(p => { progressMap[p.topic_id] = p; });
 
-        const nextIncomplete = allTopicsList.find(t => !progressMap[t.id]?.completed);
+        // Find the next incomplete topic AFTER the last studied topic
+        const lastTopicOrderIndex = lastProgress?.topics?.order_index || 0;
+        const lastTopicSubject = lastProgress?.topics?.subject;
+
+        // First try: find next incomplete in same subject after last studied
+        let nextIncomplete = allTopicsList.find(t =>
+          !progressMap[t.id]?.completed &&
+          t.subject === lastTopicSubject &&
+          t.order_index > lastTopicOrderIndex
+        );
+
+        // Fallback: find any incomplete topic
+        if (!nextIncomplete) {
+          nextIncomplete = allTopicsList.find(t => !progressMap[t.id]?.completed);
+        }
+
         setNextIncompleteTopic(nextIncomplete || null);
 
         const subMap = {};
@@ -221,10 +248,11 @@ export default function Home({ profile, onNavigate }) {
       }
 
       if (isUniversity) {
+        // All uploaded lessons — not just 3
         const uploaded = progressData
-          .filter(p => p.topics?.subject === 'Uploaded Notes')
-          .slice(0, 3);
-        setUploadedLessons(uploaded);
+          .filter(p => p.topics?.subject === 'Uploaded Notes');
+        setAllUploadedLessons(uploaded);
+        setUploadedLessons(uploaded.slice(0, 3));
       }
 
     } catch (err) {
@@ -248,7 +276,7 @@ export default function Home({ profile, onNavigate }) {
         .maybeSingle();
 
       if (!classData) {
-        alert('Class code not found. Please check the code with your teacher.');
+        alert('Class code not found. Please check the code and try again.');
         setJoiningClass(false);
         return;
       }
@@ -270,7 +298,11 @@ export default function Home({ profile, onNavigate }) {
   };
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
-  const continueTarget = nextIncompleteTopic || lastTopic?.topics;
+
+  // What to show in the continue card
+  const continueTarget = nextIncompleteTopic || lastStudiedTopic?.topics;
+  const isResuming = !nextIncompleteTopic && lastStudiedTopic && !lastStudiedTopic.completed;
+  const isReviewing = !nextIncompleteTopic && lastStudiedTopic?.completed;
 
   const StatsSidebar = () => (
     <div className="flex flex-col gap-4">
@@ -283,8 +315,7 @@ export default function Home({ profile, onNavigate }) {
             { label: 'Avg Score', value: loading ? '...' : stats.avgScore > 0 ? `${stats.avgScore}%` : '—', color: '#F59E0B', bg: '#FFFBEB', icon: Icons.star },
           ].map((s, i) => (
             <div key={i} className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: s.bg, color: s.color }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: s.bg, color: s.color }}>
                 {s.icon}
               </div>
               <div>
@@ -303,9 +334,7 @@ export default function Home({ profile, onNavigate }) {
             <h3 className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest">Badges</h3>
           </div>
           {stats.completed === 0 ? (
-            <p className="text-[13px] text-[#94A3B8] leading-[1.6]">
-              Complete your first lesson to earn your first badge.
-            </p>
+            <p className="text-[13px] text-[#94A3B8] leading-[1.6]">Complete your first lesson to earn your first badge.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {stats.completed >= 1 && (
@@ -340,13 +369,19 @@ export default function Home({ profile, onNavigate }) {
         </div>
       )}
 
-      <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="text-[#336b07]">{Icons.lightbulb}</div>
-          <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
+      {showTip && (
+        <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5 relative">
+          <button onClick={() => setShowTip(false)}
+            className="absolute top-3 right-3 text-[#94A3B8] hover:text-[#475467]">
+            {Icons.close}
+          </button>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-[#336b07]">{Icons.lightbulb}</div>
+            <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
+          </div>
+          <p className="text-[13px] text-[#1E293B] leading-[1.7]">{tip}</p>
         </div>
-        <p className="text-[13px] text-[#1E293B] leading-[1.7]">{tip}</p>
-      </div>
+      )}
     </div>
   );
 
@@ -360,6 +395,7 @@ export default function Home({ profile, onNavigate }) {
           .f2 { animation: fadeUp 0.4s 0.08s ease both; }
           .f3 { animation: fadeUp 0.4s 0.16s ease both; }
           .f4 { animation: fadeUp 0.4s 0.24s ease both; }
+          .progress-bar { transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
         `}</style>
 
         <div className="f1">
@@ -383,10 +419,7 @@ export default function Home({ profile, onNavigate }) {
             ].map((item, i) => (
               <button key={i} onClick={() => onNavigate(item.nav)}
                 className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center gap-4 hover:border-[#5B9BD5] hover:shadow-sm transition-all text-left">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: item.bg, color: item.color }}>
-                  {item.icon}
-                </div>
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: item.bg, color: item.color }}>{item.icon}</div>
                 <div className="flex-1">
                   <p className="text-[15px] font-bold text-[#0F172A]">{item.title}</p>
                   <p className="text-[13px] text-[#475467] mt-0.5 leading-[1.5]">{item.desc}</p>
@@ -397,19 +430,19 @@ export default function Home({ profile, onNavigate }) {
           </div>
         )}
 
-        {stats.completed > 0 && lastTopic && (
+        {stats.completed > 0 && lastStudiedTopic && (
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">Continue where you left off</span>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
               <div>
-                <h2 className="text-[20px] font-bold text-white">{lastTopic.topics?.title}</h2>
+                <h2 className="text-[20px] font-bold text-white">{lastStudiedTopic.topics?.title}</h2>
                 <p className="text-[13px] text-[#64748B] mt-1">
-                  {lastTopic.completed ? 'Completed' : `Level ${lastTopic.level_reached} of 4`}
+                  {lastStudiedTopic.completed ? 'Completed' : `Level ${lastStudiedTopic.level_reached} of 4`}
                 </p>
               </div>
-              <button onClick={() => navigate(`/lesson/${lastTopic.topic_id}`)}
+              <button onClick={() => navigate(`/lesson/${lastStudiedTopic.topic_id}`)}
                 className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0">
-                Continue {Icons.arrow}
+                {lastStudiedTopic.completed ? 'Review' : 'Continue'} {Icons.arrow}
               </button>
             </div>
           </div>
@@ -424,31 +457,32 @@ export default function Home({ profile, onNavigate }) {
             ].map((item, i) => (
               <button key={i} onClick={() => onNavigate(item.nav)}
                 className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3 hover:border-[#5B9BD5] transition-all text-left">
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: item.bg, color: item.color }}>
-                  {item.icon}
-                </div>
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: item.bg, color: item.color }}>{item.icon}</div>
                 <p className="text-[14px] font-semibold text-[#0F172A]">{item.label}</p>
               </button>
             ))}
           </div>
         )}
 
-        {uploadedLessons.length > 0 && (
+        {allUploadedLessons.length > 0 && (
           <div className="f3">
-            <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest mb-3">Recent Notes</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">My Notes</p>
+              {allUploadedLessons.length > 3 && (
+                <button onClick={() => setShowAllUploaded(!showAllUploaded)}
+                  className="text-[13px] text-[#136299] font-semibold hover:underline">
+                  {showAllUploaded ? 'Show less' : `See all ${allUploadedLessons.length}`}
+                </button>
+              )}
+            </div>
             <div className="flex flex-col gap-2">
-              {uploadedLessons.map((p, i) => (
+              {(showAllUploaded ? allUploadedLessons : uploadedLessons).map((p, i) => (
                 <button key={i} onClick={() => navigate(`/lesson/${p.topic_id}`)}
                   className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3 hover:border-[#5B9BD5] transition-all text-left">
-                  <div className="w-9 h-9 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299] flex-shrink-0">
-                    {Icons.file}
-                  </div>
+                  <div className="w-9 h-9 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299] flex-shrink-0">{Icons.file}</div>
                   <div className="flex-1">
                     <p className="text-[14px] font-semibold text-[#0F172A]">{p.topics?.title}</p>
-                    <p className="text-[12px] text-[#94A3B8]">
-                      {p.completed ? 'Completed' : `Level ${p.level_reached} of 4`}
-                    </p>
+                    <p className="text-[12px] text-[#94A3B8]">{p.completed ? 'Completed' : `Level ${p.level_reached} of 4`}</p>
                   </div>
                   <span className="text-[#5B9BD5]">{Icons.arrow}</span>
                 </button>
@@ -467,10 +501,7 @@ export default function Home({ profile, onNavigate }) {
                 { label: 'Avg Score', value: loading ? '...' : stats.avgScore > 0 ? `${stats.avgScore}%` : '—', color: '#F59E0B', bg: '#FFFBEB', icon: Icons.star },
               ].map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: s.bg, color: s.color }}>
-                    {s.icon}
-                  </div>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: s.bg, color: s.color }}>{s.icon}</div>
                   <div>
                     <p className="text-[22px] font-extrabold leading-none" style={{ color: s.color }}>{s.value}</p>
                     <p className="text-[12px] text-[#94A3B8] mt-0.5">{s.label}</p>
@@ -479,13 +510,16 @@ export default function Home({ profile, onNavigate }) {
               ))}
             </div>
           </div>
-          <div className="lg:w-[260px] bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="text-[#336b07]">{Icons.lightbulb}</div>
-              <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
+          {showTip && (
+            <div className="lg:w-[260px] bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-5 relative">
+              <button onClick={() => setShowTip(false)} className="absolute top-3 right-3 text-[#94A3B8] hover:text-[#475467]">{Icons.close}</button>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="text-[#336b07]">{Icons.lightbulb}</div>
+                <h3 className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest">Daily Tip</h3>
+              </div>
+              <p className="text-[13px] text-[#1E293B] leading-[1.7]">{tip}</p>
             </div>
-            <p className="text-[13px] text-[#1E293B] leading-[1.7]">{tip}</p>
-          </div>
+          )}
         </div>
       </div>
     );
@@ -518,9 +552,14 @@ export default function Home({ profile, onNavigate }) {
             </p>
           </div>
 
+          {/* CONTINUE CARD */}
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">
-              {continueTarget ? (nextIncompleteTopic ? 'Up next' : 'Continue where you left off') : 'Start learning'}
+              {continueTarget
+                ? isResuming ? 'Continue where you left off'
+                : isReviewing ? 'Review your last topic'
+                : 'Up next'
+                : 'Start learning'}
             </span>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
               <div>
@@ -529,40 +568,40 @@ export default function Home({ profile, onNavigate }) {
                 </h2>
                 <p className="text-[13px] text-[#64748B] mt-1">
                   {continueTarget?.subject || 'Mathematics'} · {
-                    lastTopic && !nextIncompleteTopic
-                      ? lastTopic.completed ? 'Completed' : `Level ${lastTopic.level_reached} of 4`
+                    isResuming
+                      ? `Level ${lastStudiedTopic?.level_reached} of 4 — keep going`
+                      : isReviewing ? 'Completed'
                       : 'Ready to start'
                   }
                 </p>
-                {lastTopic && !lastTopic.completed && !nextIncompleteTopic && (
+                {isResuming && (
                   <div className="flex items-center gap-3 mt-3">
                     <div className="w-[140px] bg-[#1E293B] rounded-full h-1.5">
                       <div className="bg-[#5B9BD5] h-1.5 rounded-full progress-bar"
-                        style={{ width: `${((lastTopic.level_reached || 0) / 4) * 100}%` }}/>
+                        style={{ width: `${((lastStudiedTopic?.level_reached || 0) / 4) * 100}%` }}/>
                     </div>
-                    <span className="text-[12px] text-[#475467]">Level {lastTopic.level_reached} of 4</span>
+                    <span className="text-[12px] text-[#475467]">Level {lastStudiedTopic?.level_reached} of 4</span>
                   </div>
                 )}
               </div>
               <button
                 onClick={() => {
                   if (nextIncompleteTopic) navigate(`/lesson/${nextIncompleteTopic.id}`);
-                  else if (lastTopic) navigate(`/lesson/${lastTopic.topic_id}`);
+                  else if (lastStudiedTopic) navigate(`/lesson/${lastStudiedTopic.topic_id}`);
                   else navigate('/topics/Mathematics');
                 }}
                 className="flex items-center gap-2 px-6 py-3 bg-[#5B9BD5] hover:bg-[#4A7DAF] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0 active:scale-[0.98]">
-                {nextIncompleteTopic ? 'Start' : lastTopic?.completed ? 'Review' : 'Continue'} {Icons.arrow}
+                {nextIncompleteTopic ? 'Start' : isResuming ? 'Continue' : 'Review'} {Icons.arrow}
               </button>
             </div>
           </div>
 
+          {/* SUBJECTS */}
           <div className="f3">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[15px] font-bold text-[#0F172A]">My Subjects</h2>
               <button onClick={() => onNavigate('subjects')}
-                className="text-[13px] text-[#136299] font-semibold hover:underline">
-                View all
-              </button>
+                className="text-[13px] text-[#136299] font-semibold hover:underline">View all</button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {subjectLoading ? (
@@ -582,9 +621,7 @@ export default function Home({ profile, onNavigate }) {
                       onClick={() => navigate(`/topics/${encodeURIComponent(s.key)}`)}
                       className="bg-white border border-[#E4E7EC] rounded-2xl p-4 text-left hover:border-[#5B9BD5] hover:shadow-sm transition-all active:scale-[0.98]">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-                        style={{ background: s.bg, color: s.color }}>
-                        {s.icon}
-                      </div>
+                        style={{ background: s.bg, color: s.color }}>{s.icon}</div>
                       <p className="text-[14px] font-bold text-[#0F172A]">{s.key}</p>
                       <p className="text-[11px] text-[#94A3B8] mt-0.5">{sp.done} of {sp.total} topics</p>
                       <div className="mt-2 bg-[#F1F5F9] rounded-full h-1.5">
@@ -598,17 +635,14 @@ export default function Home({ profile, onNavigate }) {
             </div>
           </div>
 
+          {/* CLASS CODE INPUT */}
           {!classJoined && (
             <div className="f4 bg-[#F8FAFC] border border-[#E4E7EC] rounded-2xl p-5">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299]">
-                  {Icons.book}
-                </div>
+                <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299]">{Icons.book}</div>
                 <p className="text-[14px] font-bold text-[#0F172A]">Have a class code?</p>
               </div>
-              <p className="text-[13px] text-[#475467] mb-3">
-                Enter your teacher's class code to access their materials.
-              </p>
+              <p className="text-[13px] text-[#475467] mb-3">Enter your teacher's class code to access their materials.</p>
               <div className="flex gap-2">
                 <input type="text" placeholder="e.g. PATH-4821"
                   value={classCode}

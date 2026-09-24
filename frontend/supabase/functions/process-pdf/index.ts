@@ -15,13 +15,39 @@ async function extractTextFromPDF(base64: string): Promise<string> {
       bytes[i] = binaryStr.charCodeAt(i);
     }
     const { text } = await extractText(bytes, { mergePages: true });
-    if (!text || text.trim().length < 50) {
-      throw new Error('Could not extract enough text from this PDF. Please use Paste Notes instead.');
+    if (text && text.trim().length >= 50) {
+      return text;
     }
-    return text;
+    // Text extraction returned too little — try raw text extraction
+    throw new Error('INSUFFICIENT_TEXT');
   } catch (err: any) {
-    if (err.message.includes('Could not extract')) throw err;
-    throw new Error('Could not read this PDF. Please use Paste Notes instead.');
+    if (err.message === 'INSUFFICIENT_TEXT') {
+      throw new Error('This PDF appears to be scanned or image-based. Please copy and paste your text using Paste Notes instead.');
+    }
+    // unpdf itself failed — try basic text extraction
+    try {
+      const binaryStr = atob(base64);
+      // Extract any readable ASCII text from the binary
+      let rawText = '';
+      for (let i = 0; i < binaryStr.length; i++) {
+        const code = binaryStr.charCodeAt(i);
+        if (code >= 32 && code < 127) rawText += binaryStr[i];
+        else rawText += ' ';
+      }
+      // Clean up the extracted text
+      const cleaned = rawText
+        .replace(/\s+/g, ' ')
+        .replace(/[^\x20-\x7E]/g, '')
+        .trim();
+      const words = cleaned.split(' ').filter(w => w.length > 2);
+      const meaningfulText = words.join(' ');
+      if (meaningfulText.length > 200) {
+        return meaningfulText.substring(0, 8000);
+      }
+    } catch {
+      // Fallback also failed
+    }
+    throw new Error('Could not read this PDF. Please use Paste Notes instead — copy your content and paste it directly.');
   }
 }
 
@@ -32,8 +58,8 @@ function smartChunk(text: string): string[] {
 
   const isHeading = (line: string): boolean => {
     const trimmed = line.trim();
-    if (!trimmed) return false;
-    if (trimmed.length < 80 && trimmed.length > 2) {
+    if (!trimmed || trimmed.length < 3) return false;
+    if (trimmed.length < 80) {
       if (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)) return true;
       if (/^(\d+[\.\)]|chapter|section|topic|unit|part|introduction|conclusion|summary)/i.test(trimmed)) return true;
       if (trimmed.endsWith(':') && trimmed.split(' ').length <= 6) return true;
@@ -109,9 +135,9 @@ Return ONLY a raw JSON array with exactly ${chunks.length} objects. No markdown,
 ]
 
 Rules:
-- Return exactly ${chunks.length} lesson objects in the array
-- Each lesson must cover its corresponding section
-- Choose level_3_visual type: "steps" for processes, "terms" for vocabulary, "compare" for comparisons
+- Return exactly ${chunks.length} lesson objects
+- Each lesson covers its corresponding section
+- Choose level_3_visual type: "steps" for processes, "terms" for vocabulary (items have "term" and "definition"), "compare" for comparisons (items have "left" and "right")
 - Keep language simple and encouraging
 - Appropriate for ${gradeLevel} level`;
 
@@ -139,12 +165,12 @@ Rules:
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`OpenRouter error: ${err}`);
+    throw new Error(`AI service error. Please try again in a moment.`);
   }
 
   const data = await response.json();
   let content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Empty response from AI. Please try again.');
+  if (!content) throw new Error('AI returned an empty response. Please try again.');
 
   content = content
     .replace(/^```json\s*/i, '')
@@ -153,9 +179,13 @@ Rules:
     .trim();
 
   const arrayMatch = content.match(/\[[\s\S]*\]/);
-  if (!arrayMatch) throw new Error('Could not parse AI response. Please try again.');
+  if (!arrayMatch) throw new Error('Could not process AI response. Please try again.');
 
-  return JSON.parse(arrayMatch[0]);
+  try {
+    return JSON.parse(arrayMatch[0]);
+  } catch {
+    throw new Error('Could not process AI response. Please try again.');
+  }
 }
 
 async function saveLesson(
@@ -253,7 +283,7 @@ serve(async (req) => {
 
     if (!studentId && !classId) {
       return new Response(
-        JSON.stringify({ error: 'Student ID or Class ID required.' }),
+        JSON.stringify({ error: 'Session error. Please log out and log back in.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
@@ -263,7 +293,7 @@ serve(async (req) => {
 
     if (!supabaseUrl || !supabaseKey) {
       return new Response(
-        JSON.stringify({ error: 'Server configuration error.' }),
+        JSON.stringify({ error: 'Server configuration error. Please contact support.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
@@ -274,7 +304,7 @@ serve(async (req) => {
       extractedText = pasteText.trim();
       if (extractedText.length < 20) {
         return new Response(
-          JSON.stringify({ error: 'Please paste more content. The text is too short.' }),
+          JSON.stringify({ error: 'Please paste more content. The text is too short to create lessons from.' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
         );
       }
@@ -291,7 +321,7 @@ serve(async (req) => {
 
     const title = (topicTitle || 'My Notes').trim();
     const chunks = smartChunk(extractedText);
-    console.log(`Detected ${chunks.length} natural sections for: ${title}`);
+    console.log(`Detected ${chunks.length} sections for: ${title}`);
 
     let lessons: any[];
     try {
@@ -305,7 +335,7 @@ serve(async (req) => {
 
     if (!lessons || lessons.length === 0) {
       return new Response(
-        JSON.stringify({ error: 'Could not generate lessons. Please try again.' }),
+        JSON.stringify({ error: 'Could not generate lessons from your content. Please try again.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }

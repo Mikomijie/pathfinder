@@ -19,12 +19,6 @@ const Icons = {
       <polyline points="20 6 9 17 4 12"/>
     </svg>
   ),
-  lock: (
-    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="3" y="11" width="18" height="11" rx="2"/>
-      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
-  ),
   clock: (
     <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/>
@@ -92,6 +86,7 @@ export default function TopicsList() {
         .from('topics')
         .select('*')
         .eq('subject', decodedSubject)
+        .is('deleted_at', null)
         .order('order_index', { ascending: true });
 
       const { data: progressData } = await supabase
@@ -111,34 +106,19 @@ export default function TopicsList() {
     }
   };
 
-  const getTopicStatus = (topic, index) => {
+  const getTopicStatus = (topic) => {
     const p = progress[topic.id];
     if (p?.completed) return 'completed';
     if (p?.level_reached > 0) return 'inprogress';
-
-    // First topic always available
-    if (index === 0) return 'available';
-
-    // Check if previous topic is completed OR has been started
-    const prevTopic = topics[index - 1];
-    if (prevTopic) {
-      const prevProgress = progress[prevTopic.id];
-      // Unlock if previous topic is completed
-      if (prevProgress?.completed) return 'available';
-      // Also unlock if previous topic has no quiz questions
-      // (AI-generated topics) — check level_reached >= 3
-      if (prevProgress?.level_reached >= 3) return 'available';
-    }
-
-    return 'upcoming';
+    // ALL topics are available — no locking for neurodivergent students
+    return 'available';
   };
 
   const completedCount = topics.filter(t => progress[t.id]?.completed).length;
-  const currentTopicIndex = topics.findIndex((t, i) => {
-    const status = getTopicStatus(t, i);
-    return status === 'inprogress' || status === 'available';
-  });
-  const currentTopic = topics[currentTopicIndex];
+
+  // Current topic — first in progress, then first available
+  const currentTopic = topics.find(t => progress[t.id]?.level_reached > 0 && !progress[t.id]?.completed)
+    || topics.find(t => !progress[t.id]?.completed);
 
   if (loading) {
     return (
@@ -179,7 +159,6 @@ export default function TopicsList() {
         .progress-bar { transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
       `}</style>
 
-      {/* TOP BAR */}
       <header className="bg-white border-b border-[#E4E7EC] sticky top-0 z-20">
         <div className="max-w-[720px] mx-auto px-5 md:px-8 h-[60px] flex items-center justify-between">
           <button onClick={() => navigate('/dashboard/student')}
@@ -195,7 +174,6 @@ export default function TopicsList() {
 
       <div className="max-w-[720px] mx-auto px-5 md:px-8 py-8">
 
-        {/* SUBJECT HEADER */}
         <div className="f1 flex items-center gap-4 mb-8">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0"
             style={{ background: config.bg, color: config.color }}>
@@ -207,23 +185,21 @@ export default function TopicsList() {
           </div>
         </div>
 
-        {/* JOURNEY PATH */}
         <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5 mb-6">
           <p className="text-[12px] font-bold text-[#94A3B8] uppercase tracking-widest mb-4">Your Journey</p>
           <div className="flex items-center gap-1 mb-3">
             {topics.map((t, i) => {
-              const status = getTopicStatus(t, i);
+              const status = getTopicStatus(t);
               return (
                 <React.Fragment key={t.id}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold transition-all ${
                     status === 'completed' ? 'text-white'
-                    : status === 'inprogress' || status === 'available' ? 'text-white pulse'
+                    : status === 'inprogress' ? 'text-white pulse'
                     : 'bg-[#F1F5F9] text-[#94A3B8]'
                   }`}
                     style={
                       status === 'completed' ? { background: config.color }
-                      : status === 'inprogress' || status === 'available'
-                      ? { background: config.color, opacity: 0.7 }
+                      : status === 'inprogress' ? { background: config.color, opacity: 0.7 }
                       : {}
                     }
                   >
@@ -237,8 +213,6 @@ export default function TopicsList() {
               );
             })}
           </div>
-
-          {/* Progress bar */}
           <div className="bg-[#F1F5F9] rounded-full h-2 mt-2">
             <div className="h-2 rounded-full progress-bar"
               style={{
@@ -255,7 +229,6 @@ export default function TopicsList() {
           </p>
         </div>
 
-        {/* CURRENT TOPIC — BIG CARD */}
         {currentTopic && (
           <div className="f2 rounded-2xl p-6 md:p-7 mb-6 border-2"
             style={{ background: config.light, borderColor: config.color }}>
@@ -282,15 +255,12 @@ export default function TopicsList() {
               </div>
             </div>
 
-            {/* Show level progress if in progress */}
             {progress[currentTopic.id]?.level_reached > 0 && !progress[currentTopic.id]?.completed && (
               <div className="flex items-center gap-3 mb-5">
                 <div className="flex gap-1.5">
                   {[1,2,3,4].map(l => (
                     <div key={l} className="w-6 h-1.5 rounded-full"
-                      style={{
-                        background: l <= progress[currentTopic.id].level_reached ? config.color : '#E4E7EC'
-                      }}/>
+                      style={{ background: l <= progress[currentTopic.id].level_reached ? config.color : '#E4E7EC' }}/>
                   ))}
                 </div>
                 <span className="text-[12px] text-[#475467]">
@@ -302,55 +272,46 @@ export default function TopicsList() {
             <button
               onClick={() => navigate(`/lesson/${currentTopic.id}`)}
               className="flex items-center gap-2 px-8 py-3.5 text-white text-[15px] font-bold rounded-xl transition-colors shadow-sm active:scale-[0.98]"
-              style={{ background: config.color }}
-            >
+              style={{ background: config.color }}>
               {progress[currentTopic.id]?.level_reached > 0 ? 'Continue Lesson' : 'Start Lesson'}
               {Icons.arrow}
             </button>
           </div>
         )}
 
-        {/* ALL TOPICS LIST */}
         <div className="f3">
           <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest mb-3">All Topics</p>
           <div className="flex flex-col gap-3">
-            {topics.map((topic, index) => {
-              const status = getTopicStatus(topic, index);
+            {topics.map((topic) => {
+              const status = getTopicStatus(topic);
               const isCurrent = topic.id === currentTopic?.id;
               const p = progress[topic.id];
 
               return (
                 <div
                   key={topic.id}
-                  onClick={() => status !== 'upcoming' && navigate(`/lesson/${topic.id}`)}
-                  className={`bg-white border rounded-xl p-4 flex items-center gap-4 transition-all ${
-                    status === 'upcoming'
-                      ? 'opacity-50 cursor-not-allowed border-[#E4E7EC]'
-                      : isCurrent
-                      ? 'cursor-pointer border-2 shadow-sm'
-                      : 'cursor-pointer hover:shadow-sm border-[#E4E7EC] hover:border-opacity-50'
+                  onClick={() => navigate(`/lesson/${topic.id}`)}
+                  className={`bg-white border rounded-xl p-4 flex items-center gap-4 transition-all cursor-pointer ${
+                    isCurrent
+                      ? 'border-2 shadow-sm'
+                      : 'border-[#E4E7EC] hover:border-opacity-50 hover:shadow-sm'
                   }`}
-                  style={isCurrent ? { borderColor: config.color } : {}}
-                >
-                  {/* Status indicator */}
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-[13px] font-bold`}
+                  style={isCurrent ? { borderColor: config.color } : {}}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-[13px] font-bold"
                     style={
                       status === 'completed'
                         ? { background: config.color, color: 'white' }
-                        : status === 'inprogress' || status === 'available'
+                        : status === 'inprogress'
                         ? { background: config.bg, color: config.color }
                         : { background: '#F1F5F9', color: '#94A3B8' }
                     }
                   >
-                    {status === 'completed' ? Icons.check : status === 'upcoming' ? Icons.lock : index + 1}
+                    {status === 'completed' ? Icons.check : topics.indexOf(topic) + 1}
                   </div>
 
-                  {/* Topic info */}
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className={`text-[14px] font-bold ${status === 'upcoming' ? 'text-[#94A3B8]' : 'text-[#0F172A]'}`}>
-                        {topic.title}
-                      </p>
+                      <p className="text-[14px] font-bold text-[#0F172A]">{topic.title}</p>
                       {isCurrent && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
                           style={{ background: config.color }}>
@@ -363,16 +324,11 @@ export default function TopicsList() {
                         ? `Completed${p?.score ? ` · Score: ${p.score}%` : ''}`
                         : status === 'inprogress'
                         ? `Level ${p?.level_reached || 1} of 4 · In progress`
-                        : status === 'upcoming'
-                        ? 'Complete previous topic first'
                         : 'Ready to start'}
                     </p>
                   </div>
 
-                  {/* Arrow */}
-                  {status !== 'upcoming' && (
-                    <div style={{ color: config.color }}>{Icons.arrow}</div>
-                  )}
+                  <div style={{ color: config.color }}>{Icons.arrow}</div>
                 </div>
               );
             })}

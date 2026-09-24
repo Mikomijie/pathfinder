@@ -97,13 +97,23 @@ const Icons = {
       <polyline points="14 2 14 8 20 8"/>
       <line x1="16" y1="13" x2="8" y2="13"/>
       <line x1="16" y1="17" x2="8" y2="17"/>
-      <polyline points="10 9 9 9 8 9"/>
     </svg>
   ),
   paste: (
     <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
       <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+    </svg>
+  ),
+  trash: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+    </svg>
+  ),
+  back: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M19 12H5M12 5l-7 7 7 7"/>
     </svg>
   ),
 };
@@ -128,16 +138,17 @@ export default function TeacherDashboard() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
   const [activeNav, setActiveNav] = useState('home');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [showNewClass, setShowNewClass] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
+  const [viewingClass, setViewingClass] = useState(null); // class detail view
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [copiedCode, setCopiedCode] = useState('');
+  const [showNewClass, setShowNewClass] = useState(false);
   const [newClassForm, setNewClassForm] = useState({ name: '', subject: '', level: '' });
   const [creatingClass, setCreatingClass] = useState(false);
   const [classError, setClassError] = useState('');
 
   // Upload state
-  const [uploadMode, setUploadMode] = useState('pdf'); // 'pdf' or 'paste'
+  const [uploadMode, setUploadMode] = useState('pdf');
   const [uploadClassId, setUploadClassId] = useState('');
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
@@ -146,10 +157,11 @@ export default function TeacherDashboard() {
   const [uploadError, setUploadError] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState('');
   const [uploadStep, setUploadStep] = useState('');
+  const [uploadedLessons, setUploadedLessons] = useState([]);
 
   const fetchAll = useCallback(async () => {
     try {
-     const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate('/login'); return; }
 
       const { data: profileData, error: profileErr } = await supabase
@@ -197,8 +209,8 @@ export default function TeacherDashboard() {
 
   const copyCode = (code) => {
     navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(''), 2000);
   };
 
   const handleFileChange = (e) => {
@@ -209,7 +221,7 @@ export default function TeacherDashboard() {
       return;
     }
     if (file.size > 15 * 1024 * 1024) {
-      setUploadError('File is too large. Please upload a PDF under 15MB.');
+      setUploadError('File too large. Maximum 15MB.');
       return;
     }
     setUploadFile(file);
@@ -227,12 +239,9 @@ export default function TeacherDashboard() {
     setUploading(true);
     setUploadError('');
     setUploadSuccess('');
+    setUploadedLessons([]);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-
-      // Get class level for context
       const selectedClassData = classes.find(c => c.id === uploadClassId);
       const gradeLevel = selectedClassData?.level || 'Secondary';
 
@@ -246,9 +255,7 @@ export default function TeacherDashboard() {
         setUploadStep('Reading PDF...');
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
-          reader.onload = () => {
-            resolve(reader.result.split(',')[1]);
-          };
+          reader.onload = () => { resolve(reader.result.split(',')[1]); };
           reader.onerror = () => reject(new Error('Could not read file'));
           reader.readAsDataURL(uploadFile);
         });
@@ -266,7 +273,6 @@ export default function TeacherDashboard() {
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Upload failed');
 
-      // Also save to class_materials for reference
       await supabase.from('class_materials').insert({
         class_id: uploadClassId,
         title: uploadTitle.trim(),
@@ -274,22 +280,40 @@ export default function TeacherDashboard() {
       });
 
       setUploadSuccess(`${data.message}. Students in this class can now study them.`);
-setUploadTitle('');
-setUploadFile(null);
-setPasteText('');
-setUploadClassId('');
-if (fileInputRef.current) fileInputRef.current.value = '';
-fetchAll();
-setTimeout(() => {
-  setUploadSuccess('');
-  setActiveNav('home');
-}, 3000);
+      setUploadedLessons(data.lessons || []);
+      setUploadTitle('');
+      setUploadFile(null);
+      setPasteText('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      fetchAll();
     } catch (err) {
       console.error(err);
       setUploadError(err.message || 'Upload failed. Please try again.');
     } finally {
       setUploading(false);
       setUploadStep('');
+    }
+  };
+
+  const handleDeleteMaterial = async (materialId) => {
+    if (!window.confirm('Delete this material? This cannot be undone.')) return;
+    try {
+      await supabase.from('class_materials').delete().eq('id', materialId);
+      fetchAll();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteClass = async (classId) => {
+    if (!window.confirm('Delete this class? All students will be removed. This cannot be undone.')) return;
+    try {
+      await supabase.from('class_members').delete().eq('class_id', classId);
+      await supabase.from('classes').delete().eq('id', classId);
+      setViewingClass(null);
+      fetchAll();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -320,10 +344,6 @@ setTimeout(() => {
   };
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
-  const primaryClass = classes[0];
-  const classStudents = selectedClass
-    ? students.filter(s => s.class_id === selectedClass.id)
-    : [];
 
   const navItems = [
     { key: 'home', label: 'Home', icon: Icons.home },
@@ -336,7 +356,7 @@ setTimeout(() => {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; }`}</style>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'); * { font-family: 'Plus Jakarta Sans', sans-serif; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <div className="flex flex-col items-center gap-3">
           {Icons.logo}
           <p className="text-[14px] text-[#475467]">Loading your dashboard...</p>
@@ -375,8 +395,7 @@ setTimeout(() => {
       `}</style>
 
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden"
-          onClick={() => setSidebarOpen(false)}/>
+        <div className="fixed inset-0 bg-[#0F172A]/40 z-30 md:hidden" onClick={() => setSidebarOpen(false)}/>
       )}
 
       <aside className={`
@@ -388,31 +407,26 @@ setTimeout(() => {
           {Icons.logo}
           <span className="text-[16px] font-bold text-[#136299]">PATHFINDER</span>
         </div>
-
         <div className="px-4 py-3 border-b border-[#E4E7EC] flex-shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 bg-[#F0FDF4] rounded-xl">
             <div className="w-6 h-6 rounded-full bg-[#336b07] flex items-center justify-center text-white text-[11px] font-bold">T</div>
             <span className="text-[12px] font-semibold text-[#336b07]">Teacher Account</span>
           </div>
         </div>
-
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto">
           {navItems.map(item => (
             <button key={item.key}
-              onClick={() => { setActiveNav(item.key); setSidebarOpen(false); }}
+              onClick={() => { setActiveNav(item.key); setViewingClass(null); setSidebarOpen(false); }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium transition-all w-full text-left ${
                 activeNav === item.key
                   ? 'bg-[#F0FDF4] text-[#336b07] font-semibold'
                   : 'text-[#475467] hover:bg-[#F8FAFC] hover:text-[#1E293B]'
               }`}>
-              <span className={activeNav === item.key ? 'text-[#336b07]' : 'text-[#94A3B8]'}>
-                {item.icon}
-              </span>
+              <span className={activeNav === item.key ? 'text-[#336b07]' : 'text-[#94A3B8]'}>{item.icon}</span>
               {item.label}
             </button>
           ))}
         </nav>
-
         <div className="px-3 py-4 border-t border-[#E4E7EC] flex-shrink-0">
           <button onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium text-[#BA1A1A] hover:bg-[#FFF1F1] transition-all w-full text-left">
@@ -442,44 +456,45 @@ setTimeout(() => {
           {activeNav === 'home' && (
             <div className="flex flex-col gap-5">
               <div className="f1">
-                <h1 className="text-[24px] md:text-[30px] font-extrabold text-[#0F172A]">
-                  Welcome, {firstName}.
-                </h1>
-                <p className="text-[14px] text-[#475467] mt-1">
-                  Here is what is happening across your classes today.
-                </p>
+                <h1 className="text-[24px] md:text-[30px] font-extrabold text-[#0F172A]">Welcome, {firstName}.</h1>
+                <p className="text-[14px] text-[#475467] mt-1">Here is what is happening across your classes today.</p>
               </div>
 
-              {primaryClass ? (
-                <div className="f2 bg-[#1A3A2A] rounded-2xl p-5 md:p-7">
-                  <span className="text-[10px] font-bold text-[#70AD47] uppercase tracking-widest">
-                    Your Primary Class Code
-                  </span>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-3">
-                    <div>
-                      <h2 className="text-[28px] md:text-[40px] font-extrabold text-white tracking-widest">
-                        {primaryClass.code}
-                      </h2>
-                      <p className="text-[13px] text-white/50 mt-1">
-                        {primaryClass.name} · {students.filter(s => s.class_id === primaryClass.id).length} students joined
-                      </p>
+              {/* ALL CLASS CODES */}
+              {classes.length > 0 ? (
+                <div className="f2 flex flex-col gap-3">
+                  <p className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-widest">Your Class Codes</p>
+                  {classes.map((c, i) => (
+                    <div key={i} className="bg-[#1A3A2A] rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold text-[#70AD47] uppercase tracking-widest mb-1">{c.name}</p>
+                          <h2 className="text-[28px] font-extrabold text-white tracking-widest">{c.code}</h2>
+                          <p className="text-[12px] text-white/50 mt-1">
+                            {students.filter(s => s.class_id === c.id).length} students joined
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => copyCode(c.code)}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-[#70AD47] hover:bg-[#336b07] text-white text-[13px] font-bold rounded-xl transition-colors">
+                            {copiedCode === c.code ? Icons.check : Icons.copy}
+                            {copiedCode === c.code ? 'Copied!' : 'Copy'}
+                          </button>
+                          <button onClick={() => { setActiveNav('classes'); setViewingClass(c); }}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-[13px] font-semibold rounded-xl transition-colors">
+                            View {Icons.arrow}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <button onClick={() => copyCode(primaryClass.code)}
-                      className="flex items-center gap-2 px-5 py-3 bg-[#70AD47] hover:bg-[#336b07] text-white text-[14px] font-bold rounded-xl transition-colors flex-shrink-0 active:scale-[0.98]">
-                      {copied ? Icons.check : Icons.copy}
-                      {copied ? 'Copied!' : 'Copy Code'}
-                    </button>
-                  </div>
-                  <p className="text-[12px] text-white/60 mt-4">
-                    Share this code with your students. They enter it during signup to join your class.
-                  </p>
+                  ))}
                 </div>
               ) : (
                 <div className="f2 bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
                   <p className="text-[15px] font-bold text-[#0F172A] mb-2">No classes yet</p>
                   <p className="text-[13px] text-[#475467] mb-4">Create your first class to get a code to share with students.</p>
                   <button onClick={() => setActiveNav('classes')}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-[#336b07] text-white text-[13px] font-bold rounded-xl mx-auto transition-colors">
+                    className="flex items-center gap-2 px-5 py-2.5 bg-[#336b07] text-white text-[13px] font-bold rounded-xl mx-auto">
                     {Icons.plus} Create First Class
                   </button>
                 </div>
@@ -508,30 +523,30 @@ setTimeout(() => {
                 </div>
                 {materials.length === 0 ? (
                   <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-6 text-center">
-                    <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">
-                      {Icons.upload}
-                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">{Icons.upload}</div>
                     <p className="text-[14px] font-semibold text-[#0F172A]">No materials uploaded yet</p>
                     <p className="text-[13px] text-[#94A3B8] mt-1">Upload your first PDF for students to study.</p>
                     <button onClick={() => setActiveNav('upload')}
-                      className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors mx-auto">
+                      className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] text-white text-[13px] font-bold rounded-xl mx-auto">
                       Upload Material {Icons.arrow}
                     </button>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    {materials.slice(0, 3).map((m, i) => (
+                    {materials.slice(0, 5).map((m, i) => (
                       <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07] flex-shrink-0">
-                          {Icons.file}
-                        </div>
+                        <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07] flex-shrink-0">{Icons.file}</div>
                         <div className="flex-1 min-w-0">
                           <p className="text-[14px] font-semibold text-[#0F172A] truncate">{m.title}</p>
                           <p className="text-[12px] text-[#94A3B8]">{m.description || 'No description'}</p>
                         </div>
-                        <span className="text-[11px] text-[#94A3B8] flex-shrink-0">
-                          {new Date(m.created_at).toLocaleDateString()}
-                        </span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-[11px] text-[#94A3B8]">{new Date(m.created_at).toLocaleDateString()}</span>
+                          <button onClick={() => handleDeleteMaterial(m.id)}
+                            className="text-[#94A3B8] hover:text-[#BA1A1A] transition-colors p-1">
+                            {Icons.trash}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -541,23 +556,21 @@ setTimeout(() => {
           )}
 
           {/* MY CLASSES */}
-          {activeNav === 'classes' && (
+          {activeNav === 'classes' && !viewingClass && (
             <div className="flex flex-col gap-5">
               <div className="f1 flex items-start justify-between gap-3">
                 <div>
                   <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">My Classes</h1>
-                  <p className="text-[14px] text-[#475467] mt-1">Manage your classes and share codes.</p>
+                  <p className="text-[14px] text-[#475467] mt-1">Click any class to view its details.</p>
                 </div>
                 <button onClick={() => setShowNewClass(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors flex-shrink-0">
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl flex-shrink-0">
                   {Icons.plus} New
                 </button>
               </div>
 
               {classError && (
-                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A] font-medium">
-                  {classError}
-                </div>
+                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A]">{classError}</div>
               )}
 
               {showNewClass && (
@@ -569,7 +582,7 @@ setTimeout(() => {
                       <input type="text" required placeholder="e.g. JSS 2B Mathematics"
                         value={newClassForm.name}
                         onChange={e => setNewClassForm({ ...newClassForm, name: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"/>
+                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47]"/>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -577,19 +590,19 @@ setTimeout(() => {
                         <input type="text" required placeholder="e.g. Mathematics"
                           value={newClassForm.subject}
                           onChange={e => setNewClassForm({ ...newClassForm, subject: e.target.value })}
-                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"/>
+                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47]"/>
                       </div>
                       <div>
                         <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Level</label>
                         <input type="text" required placeholder="e.g. JSS 2"
                           value={newClassForm.level}
                           onChange={e => setNewClassForm({ ...newClassForm, level: e.target.value })}
-                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] transition-all"/>
+                          className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47]"/>
                       </div>
                     </div>
                     <div className="flex gap-3">
                       <button type="submit" disabled={creatingClass}
-                        className="px-6 py-2.5 bg-[#336b07] hover:bg-[#245005] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors">
+                        className="px-6 py-2.5 bg-[#336b07] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl">
                         {creatingClass ? 'Creating...' : 'Create Class'}
                       </button>
                       <button type="button" onClick={() => { setShowNewClass(false); setClassError(''); }}
@@ -605,30 +618,136 @@ setTimeout(() => {
                 {classes.length === 0 ? (
                   <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
                     <p className="text-[14px] font-semibold text-[#0F172A]">No classes yet</p>
-                    <p className="text-[13px] text-[#94A3B8] mt-1">Create your first class to get started.</p>
                   </div>
                 ) : (
-                  classes.map((c, i) => (
-                    <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  classes.map((c, i) => {
+                    const classStudents = students.filter(s => s.class_id === c.id);
+                    const classMaterials = materials.filter(m => m.class_id === c.id);
+                    return (
+                      <button key={i}
+                        onClick={() => setViewingClass(c)}
+                        className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-3 hover:border-[#336b07] hover:shadow-sm transition-all text-left w-full active:scale-[0.99]">
                         <div>
                           <h3 className="text-[15px] font-bold text-[#0F172A]">{c.name}</h3>
                           <p className="text-[13px] text-[#94A3B8] mt-0.5">
-                            {c.subject} · {c.level} · {students.filter(s => s.class_id === c.id).length} students
+                            {c.subject} · {c.level} · {classStudents.length} students · {classMaterials.length} materials
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3 flex-shrink-0">
                           <div className="px-3 py-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
-                            <span className="text-[15px] font-extrabold text-[#336b07] tracking-widest">{c.code}</span>
+                            <span className="text-[14px] font-extrabold text-[#336b07] tracking-widest">{c.code}</span>
                           </div>
-                          <button onClick={() => copyCode(c.code)}
-                            className="flex items-center gap-1.5 px-3 py-2 bg-[#336b07] hover:bg-[#245005] text-white text-[13px] font-bold rounded-xl transition-colors">
-                            {Icons.copy} Copy
-                          </button>
+                          <span className="text-[#94A3B8]">{Icons.arrow}</span>
                         </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* CLASS DETAIL VIEW */}
+          {activeNav === 'classes' && viewingClass && (
+            <div className="flex flex-col gap-5">
+              <div className="f1 flex items-center gap-3">
+                <button onClick={() => setViewingClass(null)}
+                  className="flex items-center gap-2 text-[14px] text-[#475467] hover:text-[#0F172A] transition-colors">
+                  {Icons.back} My Classes
+                </button>
+              </div>
+
+              <div className="f2 bg-[#1A3A2A] rounded-2xl p-6">
+                <p className="text-[10px] font-bold text-[#70AD47] uppercase tracking-widest mb-1">{viewingClass.subject} · {viewingClass.level}</p>
+                <h2 className="text-[22px] font-extrabold text-white mb-3">{viewingClass.name}</h2>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="bg-white/10 rounded-xl px-5 py-3">
+                    <p className="text-[10px] text-white/50 uppercase tracking-widest mb-1">Class Code</p>
+                    <p className="text-[24px] font-extrabold text-white tracking-widest">{viewingClass.code}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => copyCode(viewingClass.code)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-[#70AD47] hover:bg-[#336b07] text-white text-[13px] font-bold rounded-xl">
+                      {copiedCode === viewingClass.code ? Icons.check : Icons.copy}
+                      {copiedCode === viewingClass.code ? 'Copied!' : 'Copy Code'}
+                    </button>
+                    <button onClick={() => { setUploadClassId(viewingClass.id); setActiveNav('upload'); }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-[13px] font-semibold rounded-xl">
+                      {Icons.upload} Upload
+                    </button>
+                    <button onClick={() => handleDeleteClass(viewingClass.id)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-[#BA1A1A]/20 hover:bg-[#BA1A1A]/40 text-[#ff9999] text-[13px] font-semibold rounded-xl">
+                      {Icons.trash} Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Students in this class */}
+              <div className="f3">
+                <h3 className="text-[15px] font-bold text-[#0F172A] mb-3">
+                  Students ({students.filter(s => s.class_id === viewingClass.id).length})
+                </h3>
+                {students.filter(s => s.class_id === viewingClass.id).length === 0 ? (
+                  <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-6 text-center">
+                    <p className="text-[14px] font-semibold text-[#0F172A]">No students yet</p>
+                    <p className="text-[13px] text-[#94A3B8] mt-1">Share the class code so students can join.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {students.filter(s => s.class_id === viewingClass.id).map((s, i) => (
+                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-[#136299] flex items-center justify-center text-white text-[13px] font-bold flex-shrink-0">
+                          {s.profiles?.full_name?.[0]?.toUpperCase() || '?'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name || 'Unknown'}</p>
+                          <p className="text-[12px] text-[#94A3B8] truncate">{s.profiles?.grade_level} · {s.profiles?.email}</p>
+                        </div>
+                        <p className="text-[11px] text-[#94A3B8] flex-shrink-0">
+                          {new Date(s.joined_at).toLocaleDateString()}
+                        </p>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Materials in this class */}
+              <div className="f4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[15px] font-bold text-[#0F172A]">
+                    Materials ({materials.filter(m => m.class_id === viewingClass.id).length})
+                  </h3>
+                  <button onClick={() => { setUploadClassId(viewingClass.id); setActiveNav('upload'); }}
+                    className="flex items-center gap-1.5 text-[13px] text-[#336b07] font-semibold hover:underline">
+                    {Icons.plus} Upload more
+                  </button>
+                </div>
+                {materials.filter(m => m.class_id === viewingClass.id).length === 0 ? (
+                  <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-6 text-center">
+                    <p className="text-[14px] font-semibold text-[#0F172A]">No materials yet</p>
+                    <button onClick={() => { setUploadClassId(viewingClass.id); setActiveNav('upload'); }}
+                      className="mt-3 flex items-center gap-2 px-5 py-2.5 bg-[#336b07] text-white text-[13px] font-bold rounded-xl mx-auto">
+                      Upload First Material {Icons.arrow}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {materials.filter(m => m.class_id === viewingClass.id).map((m, i) => (
+                      <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07] flex-shrink-0">{Icons.file}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{m.title}</p>
+                          <p className="text-[12px] text-[#94A3B8]">{m.description}</p>
+                        </div>
+                        <button onClick={() => handleDeleteMaterial(m.id)}
+                          className="text-[#94A3B8] hover:text-[#BA1A1A] transition-colors p-1 flex-shrink-0">
+                          {Icons.trash}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -639,119 +758,97 @@ setTimeout(() => {
             <div className="flex flex-col gap-5">
               <div className="f1">
                 <h1 className="text-[22px] md:text-[24px] font-extrabold text-[#0F172A]">Upload Materials</h1>
-                <p className="text-[14px] text-[#475467] mt-1">
-                  Upload a PDF or paste notes. Pathfinder turns them into adaptive lessons for your students.
-                </p>
+                <p className="text-[14px] text-[#475467] mt-1">Upload a PDF or paste notes. Pathfinder turns them into adaptive lessons for your students.</p>
               </div>
 
               {uploadError && (
-                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A] font-medium">
-                  {uploadError}
-                </div>
+                <div className="p-4 bg-[#FFF1F1] border border-[#FFCDD2] rounded-xl text-[13px] text-[#BA1A1A]">{uploadError}</div>
               )}
 
               {uploadSuccess && (
-                <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl text-[13px] text-[#336b07] font-medium flex items-center gap-2">
-                  {Icons.check} {uploadSuccess}
+                <div className="flex flex-col gap-3">
+                  <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl text-[13px] text-[#336b07] font-medium flex items-center gap-2">
+                    {Icons.check} {uploadSuccess}
+                  </div>
+                  {uploadedLessons.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Lessons created for students</p>
+                      {uploadedLessons.map((lesson, i) => (
+                        <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299] text-[12px] font-bold flex-shrink-0">
+                            {i + 1}
+                          </div>
+                          <p className="text-[14px] font-semibold text-[#0F172A]">{lesson.title}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="f2 bg-white border border-[#E4E7EC] rounded-2xl p-5 md:p-8">
                 <form onSubmit={handleUpload} className="flex flex-col gap-5">
 
-                  {/* Class selector */}
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Select Class</label>
                     <select required value={uploadClassId}
                       onChange={e => setUploadClassId(e.target.value)}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] focus:outline-none focus:border-[#70AD47] transition-all appearance-none">
+                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#70AD47] appearance-none">
                       <option value="">Choose a class</option>
                       {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
 
-                  {/* Title */}
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Material Title</label>
                     <input type="text" required placeholder="e.g. Chapter 3: Fractions, Week 5 Notes"
                       value={uploadTitle}
                       onChange={e => setUploadTitle(e.target.value)}
-                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all"/>
+                      className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47]"/>
                   </div>
 
-                  {/* Mode toggle */}
                   <div>
                     <label className="text-[13px] font-semibold text-[#1E293B] block mb-2">Upload Method</label>
                     <div className="grid grid-cols-2 gap-3">
-                      <button type="button"
-                        onClick={() => { setUploadMode('pdf'); setUploadError(''); }}
-                        className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
-                          uploadMode === 'pdf'
-                            ? 'border-[#336b07] bg-[#F0FDF4]'
-                            : 'border-[#E4E7EC] bg-white hover:border-[#70AD47]/50'
-                        }`}>
-                        <div className={uploadMode === 'pdf' ? 'text-[#336b07]' : 'text-[#94A3B8]'}>
-                          {Icons.pdf}
-                        </div>
-                        <div>
-                          <p className="text-[13px] font-bold text-[#0F172A]">Upload PDF</p>
-                          <p className="text-[11px] text-[#94A3B8]">Upload a PDF file</p>
-                        </div>
-                      </button>
-                      <button type="button"
-                        onClick={() => { setUploadMode('paste'); setUploadError(''); }}
-                        className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
-                          uploadMode === 'paste'
-                            ? 'border-[#336b07] bg-[#F0FDF4]'
-                            : 'border-[#E4E7EC] bg-white hover:border-[#70AD47]/50'
-                        }`}>
-                        <div className={uploadMode === 'paste' ? 'text-[#336b07]' : 'text-[#94A3B8]'}>
-                          {Icons.paste}
-                        </div>
-                        <div>
-                          <p className="text-[13px] font-bold text-[#0F172A]">Paste Notes</p>
-                          <p className="text-[11px] text-[#94A3B8]">Type or paste text</p>
-                        </div>
-                      </button>
+                      {[
+                        { key: 'pdf', label: 'Upload PDF', sub: 'Upload a PDF file', icon: Icons.pdf },
+                        { key: 'paste', label: 'Paste Notes', sub: 'Type or paste text', icon: Icons.paste },
+                      ].map(m => (
+                        <button key={m.key} type="button"
+                          onClick={() => { setUploadMode(m.key); setUploadError(''); }}
+                          className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all text-left ${
+                            uploadMode === m.key ? 'border-[#336b07] bg-[#F0FDF4]' : 'border-[#E4E7EC] bg-white hover:border-[#70AD47]/50'
+                          }`}>
+                          <div className={uploadMode === m.key ? 'text-[#336b07]' : 'text-[#94A3B8]'}>{m.icon}</div>
+                          <div>
+                            <p className="text-[13px] font-bold text-[#0F172A]">{m.label}</p>
+                            <p className="text-[11px] text-[#94A3B8]">{m.sub}</p>
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* PDF upload */}
                   {uploadMode === 'pdf' && (
                     <div>
                       <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">
                         PDF File <span className="text-[#94A3B8] font-normal">(max 15MB)</span>
                       </label>
                       <div className="relative border-2 border-dashed border-[#E4E7EC] rounded-xl overflow-hidden hover:border-[#70AD47] transition-colors">
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".pdf,application/pdf"
+                        <input ref={fileInputRef} type="file" accept=".pdf,application/pdf"
                           onChange={handleFileChange}
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            opacity: 0,
-                            width: '100%',
-                            height: '100%',
-                            cursor: 'pointer',
-                          }}
-                        />
+                          style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}/>
                         <div className="p-6 flex flex-col items-center gap-3 pointer-events-none">
-                          <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07]">
-                            {Icons.pdf}
-                          </div>
+                          <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#336b07]">{Icons.pdf}</div>
                           {uploadFile ? (
                             <div className="text-center">
                               <p className="text-[14px] font-semibold text-[#0F172A]">{uploadFile.name}</p>
-                              <p className="text-[12px] text-[#94A3B8] mt-0.5">
-                                {(uploadFile.size / 1024 / 1024).toFixed(1)} MB — tap to change
-                              </p>
+                              <p className="text-[12px] text-[#94A3B8]">{(uploadFile.size / 1024 / 1024).toFixed(1)} MB — tap to change</p>
                             </div>
                           ) : (
                             <div className="text-center">
                               <p className="text-[14px] font-semibold text-[#0F172A]">Tap to select PDF</p>
-                              <p className="text-[12px] text-[#94A3B8] mt-0.5">Lecture notes, textbook chapters, handouts</p>
+                              <p className="text-[12px] text-[#94A3B8]">Lecture notes, textbook chapters, handouts</p>
                             </div>
                           )}
                         </div>
@@ -759,24 +856,16 @@ setTimeout(() => {
                     </div>
                   )}
 
-                  {/* Paste mode */}
                   {uploadMode === 'paste' && (
                     <div>
                       <label className="text-[13px] font-semibold text-[#1E293B] block mb-1.5">Your Notes</label>
-                      <textarea
-                        rows={8}
-                        placeholder="Paste your lesson notes, textbook content, or any teaching material here..."
+                      <textarea rows={8} placeholder="Paste your lesson notes, textbook content, or any teaching material here..."
                         value={pasteText}
                         onChange={e => setPasteText(e.target.value)}
-                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] text-[#1E293B] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] transition-all resize-none"
-                      />
-                      <p className="text-[11px] text-[#94A3B8] mt-1.5">
-                        {pasteText.split(/\s+/).filter(w => w).length} words
-                      </p>
+                        className="w-full px-4 py-3 bg-white border border-[#E4E7EC] rounded-xl text-[14px] placeholder-[#94A3B8] focus:outline-none focus:border-[#70AD47] resize-none"/>
                     </div>
                   )}
 
-                  {/* Info box */}
                   <div className="p-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
                     <p className="text-[12px] font-bold text-[#336b07] uppercase tracking-widest mb-1">What happens after upload</p>
                     <p className="text-[13px] text-[#1E293B] leading-[1.6]">
@@ -784,14 +873,11 @@ setTimeout(() => {
                     </p>
                   </div>
 
-                  {/* Upload button */}
                   {uploading ? (
                     <div className="w-full py-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl flex items-center justify-center gap-3">
                       <div className="w-5 h-5 rounded-full border-2 border-[#BBF7D0]"
                         style={{ borderTopColor: '#336b07', animation: 'spin 1s linear infinite' }}/>
-                      <p className="text-[14px] font-semibold text-[#336b07]">
-                        {uploadStep || 'Processing...'}
-                      </p>
+                      <p className="text-[14px] font-semibold text-[#336b07]">{uploadStep || 'Processing...'}</p>
                     </div>
                   ) : (
                     <button type="submit"
@@ -800,7 +886,6 @@ setTimeout(() => {
                       Create Lessons for Students
                     </button>
                   )}
-
                 </form>
               </div>
             </div>
@@ -830,11 +915,9 @@ setTimeout(() => {
               )}
 
               <div className="f3">
-                {classStudents.length === 0 ? (
+                {students.filter(s => s.class_id === selectedClass?.id).length === 0 ? (
                   <div className="bg-white border-2 border-dashed border-[#E4E7EC] rounded-2xl p-8 text-center">
-                    <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">
-                      {Icons.students}
-                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-[#F0FDF4] flex items-center justify-center mx-auto mb-3 text-[#336b07]">{Icons.students}</div>
                     <p className="text-[14px] font-semibold text-[#0F172A]">No students yet</p>
                     <p className="text-[13px] text-[#94A3B8] mt-1">Share your class code so students can join.</p>
                     {selectedClass && (
@@ -846,16 +929,14 @@ setTimeout(() => {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    {classStudents.map((s, i) => (
+                    {students.filter(s => s.class_id === selectedClass?.id).map((s, i) => (
                       <div key={i} className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-[#136299] flex items-center justify-center text-white text-[14px] font-bold flex-shrink-0">
-                          {s.profiles?.full_name?.[0]?.toUpperCase()}
+                          {s.profiles?.full_name?.[0]?.toUpperCase() || '?'}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name}</p>
-                          <p className="text-[12px] text-[#94A3B8] truncate">
-                            {s.profiles?.grade_level} · {s.profiles?.email}
-                          </p>
+                          <p className="text-[14px] font-semibold text-[#0F172A] truncate">{s.profiles?.full_name || 'Unknown'}</p>
+                          <p className="text-[12px] text-[#94A3B8] truncate">{s.profiles?.grade_level} · {s.profiles?.email}</p>
                         </div>
                         <p className="text-[11px] text-[#94A3B8] flex-shrink-0">
                           {new Date(s.joined_at).toLocaleDateString()}
@@ -888,7 +969,7 @@ setTimeout(() => {
                   </div>
                 </div>
                 <button onClick={handleLogout}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-[#FFF1F1] text-[#BA1A1A] text-[14px] font-semibold rounded-xl hover:bg-[#FFE4E4] transition-colors">
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#FFF1F1] text-[#BA1A1A] text-[14px] font-semibold rounded-xl hover:bg-[#FFE4E4]">
                   {Icons.logout} Log Out
                 </button>
               </div>
