@@ -6,6 +6,22 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+function getSupabaseKey(): string {
+  const secretKeysRaw = Deno.env.get('SUPABASE_SECRET_KEYS');
+  if (secretKeysRaw) {
+    try {
+      const parsed = JSON.parse(secretKeysRaw);
+      const key = parsed.service_role || parsed[Object.keys(parsed)[0]];
+      if (key) return key;
+    } catch {
+      // fall through
+    }
+  }
+  const legacy = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (legacy) return legacy;
+  throw new Error('No Supabase service key found');
+}
+
 async function extractTextFromPDF(base64: string): Promise<string> {
   try {
     const { extractText } = await import("npm:unpdf@0.11.0");
@@ -18,36 +34,29 @@ async function extractTextFromPDF(base64: string): Promise<string> {
     if (text && text.trim().length >= 50) {
       return text;
     }
-    // Text extraction returned too little — try raw text extraction
     throw new Error('INSUFFICIENT_TEXT');
   } catch (err: any) {
     if (err.message === 'INSUFFICIENT_TEXT') {
       throw new Error('This PDF appears to be scanned or image-based. Please copy and paste your text using Paste Notes instead.');
     }
-    // unpdf itself failed — try basic text extraction
     try {
       const binaryStr = atob(base64);
-      // Extract any readable ASCII text from the binary
       let rawText = '';
       for (let i = 0; i < binaryStr.length; i++) {
         const code = binaryStr.charCodeAt(i);
         if (code >= 32 && code < 127) rawText += binaryStr[i];
         else rawText += ' ';
       }
-      // Clean up the extracted text
-      const cleaned = rawText
-        .replace(/\s+/g, ' ')
-        .replace(/[^\x20-\x7E]/g, '')
-        .trim();
+      const cleaned = rawText.replace(/\s+/g, ' ').replace(/[^\x20-\x7E]/g, '').trim();
       const words = cleaned.split(' ').filter(w => w.length > 2);
       const meaningfulText = words.join(' ');
       if (meaningfulText.length > 200) {
         return meaningfulText.substring(0, 8000);
       }
     } catch {
-      // Fallback also failed
+      // fallback also failed
     }
-    throw new Error('Could not read this PDF. Please use Paste Notes instead — copy your content and paste it directly.');
+    throw new Error('Could not read this PDF. Please use Paste Notes instead.');
   }
 }
 
@@ -84,108 +93,135 @@ function smartChunk(text: string): string[] {
 
   if (chunks.length <= 1) {
     const words = text.split(/\s+/);
-    const wordsPerChunk = Math.ceil(words.length / Math.min(10, Math.ceil(words.length / 500)));
+    const wordsPerChunk = Math.ceil(words.length / Math.min(6, Math.ceil(words.length / 500)));
     const splitChunks: string[] = [];
     for (let i = 0; i < words.length; i += wordsPerChunk) {
       const chunk = words.slice(i, i + wordsPerChunk).join(' ');
       if (chunk.trim().length > 100) splitChunks.push(chunk.trim());
     }
-    return splitChunks.slice(0, 10);
+    return splitChunks.slice(0, 6);
   }
 
-  return chunks.slice(0, 10);
+  return chunks.slice(0, 6);
+}
+
+function extractJSON(content: string): any | null {
+  try {
+    let cleaned = content
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      const objMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        return JSON.parse(objMatch[0]);
+      }
+    }
+  } catch {
+    // extraction failed
+  }
+  return null;
+}
+
+async function callAI(prompt: string, key: string): Promise<string | null> {
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://pathfinder-chi-seven.vercel.app',
+        'X-Title': 'Pathfinder'
+      },
+      body: JSON.stringify({
+        model: 'openrouter/free',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a teacher. Output ONLY raw valid JSON. No markdown. No backticks. No explanation. Just the JSON.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 600,
+      })
+    });
+
+    if (!response.ok) {
+      console.log(`OpenRouter returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.log('OpenRouter returned empty content');
+      return null;
+    }
+
+    console.log(`AI response preview: ${content.substring(0, 150)}`);
+    return content;
+  } catch (err) {
+    console.log(`callAI error: ${err}`);
+    return null;
+  }
 }
 
 async function generateLessonsFromChunks(
   chunks: string[],
   topicTitle: string,
-  gradeLevel: string
+  gradeLevel: string,
+  key: string
 ): Promise<any[]> {
-  const key = Deno.env.get('OPENROUTER_API_KEY');
-  if (!key) throw new Error('OPENROUTER_API_KEY not configured');
+  const lessons: any[] = [];
 
-  const chunksText = chunks.map((chunk, i) =>
-    `--- SECTION ${i + 1} ---\n${chunk.substring(0, 1200)}`
-  ).join('\n\n');
+  for (let i = 0; i < chunks.length; i++) {
+    const prompt = `You are a teacher for Nigerian students. Create a lesson from this content.
 
-  const prompt = `You are a patient, encouraging teacher for neurodivergent students in Nigeria.
+Topic: "${topicTitle}" Section ${i + 1}
+Content: ${chunks[i].substring(0, 500)}
+Level: ${gradeLevel}
 
-Transform the following ${chunks.length} sections of content about "${topicTitle}" into exactly ${chunks.length} micro-lessons.
+Respond with ONLY this JSON, nothing else:
+{"title":"short title under 8 words","explanation":"explain in 3 simple sentences","analogy":"Nigerian real-world comparison in 2 sentences","steps":"Step 1: point. Step 2: point. Step 3: point.","question":"one reflective question"}`;
 
-${chunksText}
+    const content = await callAI(prompt, key);
+    if (!content) {
+      console.log(`Chunk ${i} - AI call failed, skipping`);
+      continue;
+    }
 
-Return ONLY a raw JSON array with exactly ${chunks.length} objects. No markdown, no backticks, just raw JSON:
-[
-  {
-    "title": "lesson title max 8 words",
-    "level_1": "Simple clear explanation in 3-4 sentences. Plain language, no jargon.",
-    "level_2": "Same concept using a real-world Nigerian analogy. 3-4 sentences.",
-    "level_3": "Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps)",
-    "level_4": "Think about this: one reflective question about this content",
-    "level_3_visual": {
-      "type": "steps",
-      "title": "Key Points",
-      "items": [
-        {"label": "Point 1", "text": "key idea under 10 words"},
-        {"label": "Point 2", "text": "key idea under 10 words"},
-        {"label": "Point 3", "text": "key idea under 10 words"}
-      ]
+    const lesson = extractJSON(content);
+    if (lesson && lesson.title) {
+      const stepsText = lesson.steps || 'Step 1: Read. Step 2: Understand. Step 3: Review.';
+      const stepParts = stepsText.split(/step \d+:/i).filter((s: string) => s.trim().length > 0);
+
+      lessons.push({
+        title: lesson.title,
+        level_1: lesson.explanation || 'Key content from your notes.',
+        level_2: lesson.analogy || 'Think of this like a journey through the material.',
+        level_3: stepsText,
+        level_4: lesson.question || 'Think about this: What is the most important idea?',
+        level_3_visual: {
+          type: 'steps',
+          title: 'Key Points',
+          items: [
+            { label: 'Step 1', text: stepParts[0]?.trim().substring(0, 60) || 'First key idea' },
+            { label: 'Step 2', text: stepParts[1]?.trim().substring(0, 60) || 'Second key idea' },
+            { label: 'Step 3', text: stepParts[2]?.trim().substring(0, 60) || 'Third key idea' },
+          ]
+        }
+      });
+      console.log(`Chunk ${i} - lesson created: ${lesson.title}`);
+    } else {
+      console.log(`Chunk ${i} - JSON parse failed, raw: ${content.substring(0, 200)}`);
     }
   }
-]
 
-Rules:
-- Return exactly ${chunks.length} lesson objects
-- Each lesson covers its corresponding section
-- Choose level_3_visual type: "steps" for processes, "terms" for vocabulary (items have "term" and "definition"), "compare" for comparisons (items have "left" and "right")
-- Keep language simple and encouraging
-- Appropriate for ${gradeLevel} level`;
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://pathfinder-chi-seven.vercel.app',
-      'X-Title': 'Pathfinder'
-    },
-    body: JSON.stringify({
-      model: 'openrouter/free',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a patient teacher. Output ONLY raw valid JSON array. No markdown. No backticks. Just raw JSON.'
-        },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.2,
-      max_tokens: 4000,
-    })
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`AI service error. Please try again in a moment.`);
-  }
-
-  const data = await response.json();
-  let content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('AI returned an empty response. Please try again.');
-
-  content = content
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-
-  const arrayMatch = content.match(/\[[\s\S]*\]/);
-  if (!arrayMatch) throw new Error('Could not process AI response. Please try again.');
-
-  try {
-    return JSON.parse(arrayMatch[0]);
-  } catch {
-    throw new Error('Could not process AI response. Please try again.');
-  }
+  return lessons;
 }
 
 async function saveLesson(
@@ -241,10 +277,10 @@ async function saveLesson(
       },
       body: JSON.stringify({
         topic_id: topic.id,
-        level_1: lesson.level_1 || 'Content from your uploaded notes.',
-        level_2: lesson.level_2 || 'Think of this like a journey through the material.',
-        level_3: lesson.level_3 || 'Step 1: Read. Step 2: Understand. Step 3: Review.',
-        level_4: lesson.level_4 || 'Think about this: What is the most important idea from this section?',
+        level_1: lesson.level_1,
+        level_2: lesson.level_2,
+        level_3: lesson.level_3,
+        level_4: lesson.level_4,
         level_3_visual: lesson.level_3_visual
           ? JSON.stringify(lesson.level_3_visual)
           : null,
@@ -289,24 +325,42 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-    if (!supabaseUrl || !supabaseKey) {
+    let supabaseKey: string;
+    try {
+      supabaseKey = getSupabaseKey();
+    } catch {
       return new Response(
-        JSON.stringify({ error: 'Server configuration error. Please contact support.' }),
+        JSON.stringify({ error: 'Server configuration error.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
 
-    // Extract text
+    if (!supabaseUrl) {
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
+    const openrouterKey = Deno.env.get('OPENROUTER_API_KEY');
+    if (!openrouterKey) {
+      return new Response(
+        JSON.stringify({ error: 'OPENROUTER_API_KEY not configured' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
     let extractedText: string;
     if (pasteText) {
       extractedText = pasteText.trim();
       if (extractedText.length < 20) {
         return new Response(
-          JSON.stringify({ error: 'Please paste more content. The text is too short to create lessons from.' }),
+          JSON.stringify({ error: 'Please paste more content.' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
         );
+      }
+      if (extractedText.length > 50000) {
+        extractedText = extractedText.substring(0, 50000);
       }
     } else {
       try {
@@ -323,19 +377,11 @@ serve(async (req) => {
     const chunks = smartChunk(extractedText);
     console.log(`Detected ${chunks.length} sections for: ${title}`);
 
-    let lessons: any[];
-    try {
-      lessons = await generateLessonsFromChunks(chunks, title, gradeLevel || 'University');
-    } catch (err: any) {
-      return new Response(
-        JSON.stringify({ error: err.message }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-      );
-    }
+    const lessons = await generateLessonsFromChunks(chunks, title, gradeLevel || 'University', openrouterKey);
 
     if (!lessons || lessons.length === 0) {
       return new Response(
-        JSON.stringify({ error: 'Could not generate lessons from your content. Please try again.' }),
+        JSON.stringify({ error: 'Could not generate lessons. Please try again.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
