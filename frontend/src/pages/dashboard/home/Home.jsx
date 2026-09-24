@@ -135,7 +135,7 @@ export default function Home({ profile, onNavigate }) {
   const [showAllUploaded, setShowAllUploaded] = useState(false);
   const [classCode, setClassCode] = useState('');
   const [joiningClass, setJoiningClass] = useState(false);
-  const [classJoined, setClassJoined] = useState(false);
+  const [joinSuccessMsg, setJoinSuccessMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
   const isUniversity = profile?.student_level === 'university';
@@ -155,16 +155,6 @@ export default function Home({ profile, onNavigate }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Check if student already has a class membership
-      const { data: memberData } = await supabase
-        .from('class_members')
-        .select('id')
-        .eq('student_id', user.id)
-        .limit(1);
-      if (memberData && memberData.length > 0) {
-        setClassJoined(true);
-      }
-
       const { data: progressData } = await supabase
         .from('student_progress')
         .select('*, topics(title, subject, id, order_index)')
@@ -182,7 +172,6 @@ export default function Home({ profile, onNavigate }) {
       const avgScore = scores.length > 0
         ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
 
-      // Streak — count consecutive days with completed topics
       const completedDates = progressData
         .filter(p => p.completed && p.last_studied_at)
         .map(p => new Date(p.last_studied_at).toDateString());
@@ -198,7 +187,6 @@ export default function Home({ profile, onNavigate }) {
 
       setStats({ completed, avgScore, streak });
 
-      // Last studied topic — most recently interacted with
       const lastProgress = progressData[0];
       if (lastProgress) setLastStudiedTopic(lastProgress);
 
@@ -212,18 +200,15 @@ export default function Home({ profile, onNavigate }) {
         const progressMap = {};
         progressData.forEach(p => { progressMap[p.topic_id] = p; });
 
-        // Find the next incomplete topic AFTER the last studied topic
         const lastTopicOrderIndex = lastProgress?.topics?.order_index || 0;
         const lastTopicSubject = lastProgress?.topics?.subject;
 
-        // First try: find next incomplete in same subject after last studied
         let nextIncomplete = allTopicsList.find(t =>
           !progressMap[t.id]?.completed &&
           t.subject === lastTopicSubject &&
           t.order_index > lastTopicOrderIndex
         );
 
-        // Fallback: find any incomplete topic
         if (!nextIncomplete) {
           nextIncomplete = allTopicsList.find(t => !progressMap[t.id]?.completed);
         }
@@ -248,9 +233,7 @@ export default function Home({ profile, onNavigate }) {
       }
 
       if (isUniversity) {
-        // All uploaded lessons — not just 3
-        const uploaded = progressData
-          .filter(p => p.topics?.subject === 'Uploaded Notes');
+        const uploaded = progressData.filter(p => p.topics?.subject === 'Uploaded Notes');
         setAllUploadedLessons(uploaded);
         setUploadedLessons(uploaded.slice(0, 3));
       }
@@ -286,9 +269,17 @@ export default function Home({ profile, onNavigate }) {
         student_id: user.id,
       });
 
-      if (error && error.code !== '23505') throw error;
-      setClassJoined(true);
+      if (error && error.code === '23505') {
+        // Already in this class
+        setJoinSuccessMsg(`You are already in ${classData.name}.`);
+      } else if (error) {
+        throw error;
+      } else {
+        setJoinSuccessMsg(`You joined ${classData.name}! Their lessons now appear in My Subjects.`);
+      }
+
       setClassCode('');
+      setTimeout(() => setJoinSuccessMsg(''), 5000);
     } catch (err) {
       console.error(err);
       alert('Could not join class. Please try again.');
@@ -298,8 +289,6 @@ export default function Home({ profile, onNavigate }) {
   };
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
-
-  // What to show in the continue card
   const continueTarget = nextIncompleteTopic || lastStudiedTopic?.topics;
   const isResuming = !nextIncompleteTopic && lastStudiedTopic && !lastStudiedTopic.completed;
   const isReviewing = !nextIncompleteTopic && lastStudiedTopic?.completed;
@@ -552,7 +541,6 @@ export default function Home({ profile, onNavigate }) {
             </p>
           </div>
 
-          {/* CONTINUE CARD */}
           <div className="f2 bg-[#0F172A] rounded-2xl p-6 md:p-7">
             <span className="text-[10px] font-bold text-[#5B9BD5] uppercase tracking-widest">
               {continueTarget
@@ -596,7 +584,6 @@ export default function Home({ profile, onNavigate }) {
             </div>
           </div>
 
-          {/* SUBJECTS */}
           <div className="f3">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[15px] font-bold text-[#0F172A]">My Subjects</h2>
@@ -635,37 +622,34 @@ export default function Home({ profile, onNavigate }) {
             </div>
           </div>
 
-          {/* CLASS CODE INPUT */}
-          {!classJoined && (
-            <div className="f4 bg-[#F8FAFC] border border-[#E4E7EC] rounded-2xl p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299]">{Icons.book}</div>
-                <p className="text-[14px] font-bold text-[#0F172A]">Have a class code?</p>
-              </div>
-              <p className="text-[13px] text-[#475467] mb-3">Enter your teacher's class code to access their materials.</p>
-              <div className="flex gap-2">
-                <input type="text" placeholder="e.g. PATH-4821"
-                  value={classCode}
-                  onChange={e => setClassCode(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && handleJoinClass()}
-                  className="flex-1 px-4 py-2.5 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#5B9BD5] uppercase transition-colors"/>
-                <button onClick={handleJoinClass}
-                  disabled={joiningClass || !classCode.trim()}
-                  className="px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors">
-                  {joiningClass ? '...' : 'Join'}
-                </button>
-              </div>
+          {/* CLASS CODE — always visible, supports multiple classes */}
+          <div className="f4 bg-[#F8FAFC] border border-[#E4E7EC] rounded-2xl p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#136299]">{Icons.book}</div>
+              <p className="text-[14px] font-bold text-[#0F172A]">Join a class</p>
             </div>
-          )}
-
-          {classJoined && (
-            <div className="f4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-4 flex items-center gap-3">
-              <div className="text-[#70AD47]">{Icons.check}</div>
-              <p className="text-[13px] font-semibold text-[#336b07]">
-                You are in a class. Your teacher's lessons appear in My Subjects.
-              </p>
+            <p className="text-[13px] text-[#475467] mb-3">
+              Enter your teacher's class code. You can join multiple classes.
+            </p>
+            <div className="flex gap-2">
+              <input type="text" placeholder="e.g. PATH-4821"
+                value={classCode}
+                onChange={e => setClassCode(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && handleJoinClass()}
+                className="flex-1 px-4 py-2.5 bg-white border border-[#E4E7EC] rounded-xl text-[14px] focus:outline-none focus:border-[#5B9BD5] uppercase transition-colors"/>
+              <button onClick={handleJoinClass}
+                disabled={joiningClass || !classCode.trim()}
+                className="px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] disabled:bg-[#94A3B8] text-white text-[13px] font-bold rounded-xl transition-colors">
+                {joiningClass ? '...' : 'Join'}
+              </button>
             </div>
-          )}
+            {joinSuccessMsg && (
+              <div className="mt-3 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-3 flex items-center gap-2">
+                <div className="text-[#70AD47] flex-shrink-0">{Icons.check}</div>
+                <p className="text-[13px] font-semibold text-[#336b07]">{joinSuccessMsg}</p>
+              </div>
+            )}
+          </div>
 
         </div>
 
