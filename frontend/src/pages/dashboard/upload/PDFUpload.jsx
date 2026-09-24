@@ -136,15 +136,18 @@ export default function PDFUpload({ profile }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not logged in. Please log in again.');
 
-      const { data, error: fnError } = await supabase.functions.invoke('process-pdf', {
-        body: {
-          pdfBase64: mode === 'pdf' ? pdfBase64 : null,
-          pasteText: mode === 'paste' ? pasteText : null,
-          topicTitle: topicTitle.trim() || fileName.replace('.pdf', '') || 'My Notes',
-          studentId: user.id,
-          gradeLevel: profile?.grade_level || 'University',
-        },
-      });
+      let data, fnError;
+const result1 = await supabase.functions.invoke('process-pdf', { body: { pdfBase64: mode === 'pdf' ? pdfBase64 : null, pasteText: mode === 'paste' ? pasteText : null, topicTitle: topicTitle.trim() || fileName.replace('.pdf', '') || 'My Notes', studentId: user.id, gradeLevel: profile?.grade_level || 'University' } });
+if (result1.error) {
+  console.log('First attempt failed, retrying...');
+  await new Promise(r => setTimeout(r, 3000));
+  const result2 = await supabase.functions.invoke('process-pdf', { body: { pdfBase64: mode === 'pdf' ? pdfBase64 : null, pasteText: mode === 'paste' ? pasteText : null, topicTitle: topicTitle.trim() || fileName.replace('.pdf', '') || 'My Notes', studentId: user.id, gradeLevel: profile?.grade_level || 'University' } });
+  data = result2.data;
+  fnError = result2.error;
+} else {
+  data = result1.data;
+  fnError = result1.error;
+}
 
       clearInterval(stepInterval);
       if (fnError) throw new Error(fnError.message);
