@@ -82,6 +82,11 @@ const Icons = {
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
     </svg>
   ),
+  chevron: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  ),
 };
 
 const subjectConfig = [
@@ -93,14 +98,9 @@ const subjectConfig = [
 async function generateLesson(topicTitle, subject) {
   const key = process.env.REACT_APP_OPENROUTER_KEY;
   const prompt = `You are a patient, encouraging teacher for neurodivergent students in Nigeria.
-
 Create an adaptive lesson about: "${topicTitle}" for subject: "${subject}"
-
-Return ONLY this exact JSON, no markdown, no backticks, no extra text:
-{"level_1":"Simple clear explanation in 3-4 sentences. Plain language, no jargon.","level_2":"Same concept using a real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ... (key points as numbered steps, each under 15 words)","level_4":"Think about this: one reflective question to check understanding","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point under 10 words"},{"label":"Step 2","text":"second key point under 10 words"},{"label":"Step 3","text":"third key point under 10 words"}]}}
-
-The level_3_visual type must be one of: "steps" (for processes), "compare" (for comparisons, items have "left" and "right"), "terms" (for vocabulary, items have "term" and "definition").
-Pick whichever type best fits the topic.`;
+Return ONLY this exact JSON, no markdown, no backticks:
+{"level_1":"Simple clear explanation in 3-4 sentences.","level_2":"Real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ...","level_4":"Think about this: one reflective question","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point"},{"label":"Step 2","text":"second key point"},{"label":"Step 3","text":"third key point"}]}}`;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -113,11 +113,11 @@ Pick whichever type best fits the topic.`;
     body: JSON.stringify({
       model: 'openrouter/free',
       messages: [
-        { role: 'system', content: 'You are a patient teacher. Output ONLY raw valid JSON. No markdown. No backticks. Just raw JSON.' },
+        { role: 'system', content: 'Output ONLY raw valid JSON. No markdown. No backticks.' },
         { role: 'user', content: prompt }
       ],
       temperature: 0.2,
-      max_tokens: 1000
+      max_tokens: 800
     })
   });
 
@@ -144,9 +144,10 @@ export default function Subjects({ profile, onNavigate }) {
   const [subjectProgress, setSubjectProgress] = useState({});
   const [subjectLoading, setSubjectLoading] = useState(true);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [teacherTopics, setTeacherTopics] = useState([]);
+  const [teacherClasses, setTeacherClasses] = useState([]); // grouped by class
   const [myUploadedTopics, setMyUploadedTopics] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
+  const [expandedClasses, setExpandedClasses] = useState({});
 
   const isUniversity = profile?.student_level === 'university';
 
@@ -204,23 +205,43 @@ export default function Subjects({ profile, onNavigate }) {
       }
       setSubjectProgress(subMap);
 
-      // Fetch teacher topics for secondary students
-      if (!isUniversity) {
-        const { data: memberData } = await supabase
-          .from('class_members')
-          .select('class_id')
-          .eq('student_id', user.id);
+      // Fetch teacher classes and their topics — grouped by class
+      const { data: memberData } = await supabase
+        .from('class_members')
+        .select('class_id')
+        .eq('student_id', user.id);
 
-        if (memberData && memberData.length > 0) {
-          const classIds = memberData.map(m => m.class_id);
-          const { data: classTopics } = await supabase
-            .from('topics')
-            .select('*')
-            .in('class_id', classIds)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false });
-          setTeacherTopics(classTopics || []);
-        }
+      if (memberData && memberData.length > 0) {
+        const classIds = memberData.map(m => m.class_id);
+
+        const { data: classDetails } = await supabase
+          .from('classes')
+          .select('id, name, subject, level, code, profiles(full_name)')
+          .in('id', classIds);
+
+        const { data: classTopics } = await supabase
+          .from('topics')
+          .select('*')
+          .in('class_id', classIds)
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false });
+
+        const grouped = (classDetails || []).map(c => ({
+          classId: c.id,
+          className: c.name,
+          subject: c.subject,
+          level: c.level,
+          code: c.code,
+          teacherName: c.profiles?.full_name || 'Your Teacher',
+          topics: (classTopics || []).filter(t => t.class_id === c.id),
+        }));
+
+        setTeacherClasses(grouped);
+
+        // Auto-expand all classes
+        const expanded = {};
+        grouped.forEach(g => { expanded[g.classId] = true; });
+        setExpandedClasses(expanded);
       }
 
       // Fetch self-uploaded topics for university students
@@ -233,23 +254,6 @@ export default function Subjects({ profile, onNavigate }) {
           .is('deleted_at', null)
           .order('created_at', { ascending: false });
         setMyUploadedTopics(uploadedTopics || []);
-
-        // Also fetch teacher topics if in a class
-        const { data: memberData } = await supabase
-          .from('class_members')
-          .select('class_id')
-          .eq('student_id', user.id);
-
-        if (memberData && memberData.length > 0) {
-          const classIds = memberData.map(m => m.class_id);
-          const { data: classTopics } = await supabase
-            .from('topics')
-            .select('*')
-            .in('class_id', classIds)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false });
-          setTeacherTopics(classTopics || []);
-        }
       }
 
     } catch (err) {
@@ -263,10 +267,7 @@ export default function Subjects({ profile, onNavigate }) {
     if (!window.confirm('Delete this lesson? This cannot be undone.')) return;
     setDeletingId(topicId);
     try {
-      await supabase
-        .from('topics')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('id', topicId);
+      await supabase.from('topics').update({ deleted_at: new Date().toISOString() }).eq('id', topicId);
       setMyUploadedTopics(prev => prev.filter(t => t.id !== topicId));
     } catch (err) {
       console.error(err);
@@ -279,11 +280,7 @@ export default function Subjects({ profile, onNavigate }) {
     setSearching(true);
     try {
       const { data } = await supabase
-        .from('topics')
-        .select('*')
-        .ilike('title', `%${q}%`)
-        .is('deleted_at', null)
-        .limit(8);
+        .from('topics').select('*').ilike('title', `%${q}%`).is('deleted_at', null).limit(8);
       setResults(data || []);
       setShowDropdown(true);
     } catch (err) {
@@ -315,20 +312,9 @@ export default function Subjects({ profile, onNavigate }) {
     try {
       const q = query.toLowerCase();
       let subject = 'General Studies';
-      if (q.includes('math') || q.includes('fraction') || q.includes('equation') ||
-        q.includes('algebra') || q.includes('geometry') || q.includes('calculus') ||
-        q.includes('trigonometry') || q.includes('statistic') || q.includes('number')) {
-        subject = 'Mathematics';
-      } else if (q.includes('english') || q.includes('grammar') || q.includes('essay') ||
-        q.includes('comprehension') || q.includes('noun') || q.includes('verb') ||
-        q.includes('tense') || q.includes('sentence') || q.includes('literature') ||
-        q.includes('poem') || q.includes('write')) {
-        subject = 'English Language';
-      } else if (q.includes('biology') || q.includes('chemistry') || q.includes('physics') ||
-        q.includes('science') || q.includes('plant') || q.includes('animal') ||
-        q.includes('cell') || q.includes('energy') || q.includes('force')) {
-        subject = 'Basic Science';
-      }
+      if (q.includes('math') || q.includes('fraction') || q.includes('algebra') || q.includes('calculus') || q.includes('equation') || q.includes('geometry') || q.includes('number') || q.includes('statistic')) subject = 'Mathematics';
+      else if (q.includes('english') || q.includes('grammar') || q.includes('essay') || q.includes('noun') || q.includes('verb') || q.includes('tense') || q.includes('poem') || q.includes('literature')) subject = 'English Language';
+      else if (q.includes('biology') || q.includes('chemistry') || q.includes('physics') || q.includes('science') || q.includes('plant') || q.includes('cell') || q.includes('energy') || q.includes('force')) subject = 'Basic Science';
 
       const lessonContent = await generateLesson(query, subject);
 
@@ -341,8 +327,7 @@ export default function Subjects({ profile, onNavigate }) {
           grade_level: profile?.grade_level || 'JSS 1',
           order_index: 999,
         })
-        .select()
-        .single();
+        .select().single();
 
       if (topicError) throw topicError;
 
@@ -352,9 +337,7 @@ export default function Subjects({ profile, onNavigate }) {
         level_2: lessonContent.level_2,
         level_3: lessonContent.level_3,
         level_4: lessonContent.level_4,
-        level_3_visual: lessonContent.level_3_visual
-          ? JSON.stringify(lessonContent.level_3_visual)
-          : null,
+        level_3_visual: lessonContent.level_3_visual ? JSON.stringify(lessonContent.level_3_visual) : null,
       });
 
       saveRecentSearch(query);
@@ -363,13 +346,9 @@ export default function Subjects({ profile, onNavigate }) {
     } catch (err) {
       console.error(err);
       const msg = err.message || '';
-      if (msg.includes('Failed to fetch') || msg.includes('network')) {
-        setGenerateError('Connection lost. Please check your internet and try again.');
-      } else if (msg.includes('Empty response') || msg.includes('No valid JSON')) {
-        setGenerateError('Our AI is busy right now. Please wait a moment and try again.');
-      } else {
-        setGenerateError('Could not generate lesson. Please try again.');
-      }
+      if (msg.includes('Failed to fetch') || msg.includes('network')) setGenerateError('Connection lost. Please check your internet and try again.');
+      else if (msg.includes('Empty response') || msg.includes('No valid JSON')) setGenerateError('Our AI is busy right now. Please wait a moment and try again.');
+      else setGenerateError('Could not generate lesson. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -379,6 +358,12 @@ export default function Subjects({ profile, onNavigate }) {
     const map = { 'Mathematics': '#5B9BD5', 'English Language': '#70AD47', 'Basic Science': '#F59E0B' };
     return map[subject] || '#5B9BD5';
   };
+
+  const toggleClass = (classId) => {
+    setExpandedClasses(prev => ({ ...prev, [classId]: !prev[classId] }));
+  };
+
+  const totalTeacherLessons = teacherClasses.reduce((sum, c) => sum + c.topics.length, 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -398,21 +383,21 @@ export default function Subjects({ profile, onNavigate }) {
         <p className="text-[14px] text-[#475467] mt-1">
           {isUniversity
             ? 'Search any topic, upload notes, or study your saved lessons.'
-            : 'Pick a subject, search any topic, or study your teacher\'s materials.'}
+            : 'Your classes, subjects and lessons — all in one place.'}
         </p>
       </div>
 
       {/* SEARCH BAR */}
       <div className="f2 relative z-10" ref={searchRef}>
         <div className={`flex items-center gap-3 bg-white border-2 rounded-2xl px-4 py-3.5 transition-all ${
-          query.length > 0 ? 'border-[#5B9BD5] shadow-sm shadow-[#5B9BD5]/10' : 'border-[#E4E7EC]'
+          query.length > 0 ? 'border-[#5B9BD5] shadow-sm' : 'border-[#E4E7EC]'
         }`}>
           <span className="text-[#94A3B8] flex-shrink-0">{Icons.search}</span>
           <input
             type="text"
             placeholder={isUniversity
-              ? 'Search any topic — Chemistry, History, Law, anything...'
-              : 'Search any topic — Algebra, Geography, Government, anything...'}
+              ? 'Search any topic — Chemistry, History, Law...'
+              : 'Search any topic — Algebra, Geography, Government...'}
             value={query}
             onChange={e => { setQuery(e.target.value); setGenerateError(''); }}
             onFocus={() => query.length >= 2 && setShowDropdown(true)}
@@ -428,10 +413,9 @@ export default function Subjects({ profile, onNavigate }) {
           )}
         </div>
 
-        {/* SEARCH HINT */}
         {!query && !isUniversity && (
           <p className="text-[12px] text-[#94A3B8] mt-2 px-1">
-            You can search beyond Mathematics, English and Science — try Geography, Civic Education, Agriculture, or anything you are studying.
+            You can search beyond the 3 subjects — try Geography, Civic Education, Agriculture, or anything you are studying.
           </p>
         )}
 
@@ -442,7 +426,7 @@ export default function Subjects({ profile, onNavigate }) {
               <>
                 <div className="px-4 py-2.5 border-b border-[#F1F5F9]">
                   <p className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-widest">
-                    Found {results.length} topic{results.length !== 1 ? 's' : ''}
+                    {results.length} topic{results.length !== 1 ? 's' : ''} found
                   </p>
                 </div>
                 {results.map((topic, i) => {
@@ -470,25 +454,23 @@ export default function Subjects({ profile, onNavigate }) {
                   <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">{Icons.spark}</div>
                   <div className="flex-1">
                     <p className="text-[14px] font-semibold text-[#136299]">
-                      {generating ? 'Generating lesson...' : `Generate lesson on "${query}"`}
+                      {generating ? 'Generating...' : `Generate lesson on "${query}"`}
                     </p>
-                    <p className="text-[11px] text-[#94A3B8]">AI will create a full adaptive lesson</p>
+                    <p className="text-[11px] text-[#94A3B8]">AI creates a full adaptive lesson</p>
                   </div>
                 </button>
               </>
             ) : (
               <div className="p-4">
-                <p className="text-[13px] text-[#475467] mb-3">
-                  No existing lessons found for "<span className="font-semibold">{query}</span>"
-                </p>
+                <p className="text-[13px] text-[#475467] mb-3">No existing lessons for "{query}"</p>
                 <button onClick={handleGenerate} disabled={generating}
                   className="w-full flex items-center gap-3 p-4 bg-[#F8FAFC] hover:bg-[#EFF6FF] border border-[#E4E7EC] hover:border-[#5B9BD5] rounded-xl transition-all text-left">
                   <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-[#5B9BD5] flex-shrink-0">{Icons.spark}</div>
                   <div>
                     <p className="text-[14px] font-bold text-[#136299]">
-                      {generating ? 'Generating your lesson...' : `Generate "${query}"`}
+                      {generating ? 'Generating...' : `Generate "${query}"`}
                     </p>
-                    <p className="text-[12px] text-[#94A3B8]">AI will create a full 4-level adaptive lesson</p>
+                    <p className="text-[12px] text-[#94A3B8]">AI creates a full 4-level adaptive lesson</p>
                   </div>
                 </button>
               </div>
@@ -502,7 +484,7 @@ export default function Subjects({ profile, onNavigate }) {
               style={{ borderTopColor: '#5B9BD5', animation: 'spin 1s linear infinite' }}/>
             <div>
               <p className="text-[13px] font-semibold text-[#136299]">Creating your lesson...</p>
-              <p className="text-[11px] text-[#475467]">This takes about 10 seconds. Please wait.</p>
+              <p className="text-[11px] text-[#475467]">This takes about 10 seconds.</p>
             </div>
           </div>
         )}
@@ -536,58 +518,129 @@ export default function Subjects({ profile, onNavigate }) {
             <p className="text-[13px] text-[#475467] mt-0.5">Upload a PDF or paste notes — we break them into adaptive micro-lessons.</p>
           </div>
           <button onClick={() => onNavigate && onNavigate('upload')}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[13px] font-bold rounded-xl transition-colors flex-shrink-0">
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#136299] hover:bg-[#0F4F7A] text-white text-[13px] font-bold rounded-xl flex-shrink-0">
             Upload {Icons.arrow}
           </button>
         </div>
       )}
 
-      {/* TEACHER UPLOADED LESSONS */}
-      {teacherTopics.length > 0 && (
-        <div className="f3">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="text-[#70AD47]">{Icons.teacher}</div>
-            <h2 className="text-[14px] font-bold text-[#0F172A]">From Your Teacher</h2>
-            <span className="text-[11px] font-semibold text-[#94A3B8] bg-[#F1F5F9] px-2 py-0.5 rounded-full">
-              {teacherTopics.length} lesson{teacherTopics.length !== 1 ? 's' : ''}
+      {/* TEACHER CLASSES — grouped by class */}
+      {teacherClasses.length > 0 && (
+        <div className="f3 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="text-[#70AD47]">{Icons.teacher}</div>
+              <h2 className="text-[15px] font-bold text-[#0F172A]">From Your Teachers</h2>
+            </div>
+            <span className="text-[12px] font-semibold text-[#94A3B8]">
+              {totalTeacherLessons} lesson{totalTeacherLessons !== 1 ? 's' : ''} across {teacherClasses.length} class{teacherClasses.length !== 1 ? 'es' : ''}
             </span>
           </div>
-          <div className="flex flex-col gap-2">
-            {teacherTopics.map((topic, i) => {
-              const p = progress[topic.id];
-              return (
-                <button key={i} onClick={() => navigate(`/lesson/${topic.id}`)}
-                  className="bg-white border border-[#E4E7EC] rounded-xl p-4 flex items-center gap-3 hover:border-[#70AD47] hover:shadow-sm transition-all text-left active:scale-[0.99]">
-                  <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0">{Icons.book}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[14px] font-semibold text-[#0F172A] truncate">{topic.title}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[11px] font-semibold text-[#70AD47] bg-[#F0FDF4] px-2 py-0.5 rounded-full">Teacher</span>
-                      <p className="text-[11px] text-[#94A3B8]">4 explanation levels</p>
-                    </div>
+
+          {teacherClasses.map((group) => {
+            const isExpanded = expandedClasses[group.classId] !== false;
+            const completedInClass = group.topics.filter(t => progress[t.id]?.completed).length;
+            const classProgress = group.topics.length > 0
+              ? Math.round((completedInClass / group.topics.length) * 100) : 0;
+
+            return (
+              <div key={group.classId} className="bg-white border border-[#E4E7EC] rounded-2xl overflow-hidden">
+                {/* Class Header */}
+                <button
+                  onClick={() => toggleClass(group.classId)}
+                  className="w-full flex items-center gap-4 p-4 hover:bg-[#F8FAFC] transition-colors text-left">
+                  <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] flex items-center justify-center text-[#70AD47] flex-shrink-0 font-bold text-[14px]">
+                    {group.className?.[0]?.toUpperCase() || 'C'}
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {p?.completed && <span className="text-[#70AD47]">{Icons.check}</span>}
-                    {p && !p.completed && (
-                      <span className="text-[11px] font-semibold text-[#F59E0B] bg-[#FFFBEB] px-2 py-0.5 rounded-full">In progress</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[14px] font-bold text-[#0F172A]">{group.className}</p>
+                      <span className="text-[11px] font-semibold text-[#70AD47] bg-[#F0FDF4] px-2 py-0.5 rounded-full">
+                        {group.subject}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-[#94A3B8] mt-0.5">
+                      {group.teacherName} · {group.level} · {group.topics.length} lesson{group.topics.length !== 1 ? 's' : ''}
+                    </p>
+                    {group.topics.length > 0 && (
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex-1 bg-[#F1F5F9] rounded-full h-1">
+                          <div className="h-1 rounded-full bg-[#70AD47] progress-bar"
+                            style={{ width: `${classProgress}%` }}/>
+                        </div>
+                        <span className="text-[11px] text-[#94A3B8] flex-shrink-0">
+                          {completedInClass}/{group.topics.length}
+                        </span>
+                      </div>
                     )}
-                    <span className="text-[#70AD47]">{Icons.arrow}</span>
+                  </div>
+                  <div className={`text-[#94A3B8] flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                    {Icons.chevron}
                   </div>
                 </button>
-              );
-            })}
-          </div>
+
+                {/* Class Lessons */}
+                {isExpanded && group.topics.length > 0 && (
+                  <div className="border-t border-[#F1F5F9]">
+                    {group.topics.map((topic, i) => {
+                      const p = progress[topic.id];
+                      return (
+                        <button key={i}
+                          onClick={() => navigate(`/lesson/${topic.id}`)}
+                          className={`w-full flex items-center gap-3 px-4 py-3.5 hover:bg-[#F8FAFC] transition-colors text-left border-b border-[#F8FAFC] last:border-0 ${
+                            p?.completed ? 'opacity-80' : ''
+                          }`}>
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[12px] font-bold flex-shrink-0 ${
+                            p?.completed ? 'bg-[#F0FDF4] text-[#70AD47]' : 'bg-[#F8FAFC] text-[#94A3B8]'
+                          }`}>
+                            {p?.completed ? Icons.check : i + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[14px] font-semibold text-[#0F172A] truncate">{topic.title}</p>
+                            <p className="text-[11px] text-[#94A3B8] mt-0.5">
+                              {p?.completed
+                                ? 'Completed'
+                                : p?.level_reached > 0
+                                ? `Level ${p.level_reached} of 4 — in progress`
+                                : '4 explanation levels · Voice · Visual'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {p && !p.completed && (
+                              <div className="flex gap-0.5">
+                                {[1,2,3,4].map(l => (
+                                  <div key={l} className="w-1 h-3 rounded-full"
+                                    style={{ background: l <= (p.level_reached || 0) ? '#70AD47' : '#E4E7EC' }}/>
+                                ))}
+                              </div>
+                            )}
+                            <span className="text-[#70AD47]">{Icons.arrow}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {isExpanded && group.topics.length === 0 && (
+                  <div className="border-t border-[#F1F5F9] px-4 py-6 text-center">
+                    <p className="text-[13px] text-[#94A3B8]">No lessons uploaded yet for this class.</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* MY UPLOADED LESSONS (university) */}
+      {/* MY UPLOADED LESSONS — university */}
       {isUniversity && myUploadedTopics.length > 0 && (
         <div className="f3">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-[#136299]">{Icons.file}</div>
             <h2 className="text-[14px] font-bold text-[#0F172A]">My Uploaded Notes</h2>
             <span className="text-[11px] font-semibold text-[#94A3B8] bg-[#F1F5F9] px-2 py-0.5 rounded-full">
-              {myUploadedTopics.length} lesson{myUploadedTopics.length !== 1 ? 's' : ''}
+              {myUploadedTopics.length}
             </span>
           </div>
           <div className="flex flex-col gap-2">
@@ -608,8 +661,7 @@ export default function Subjects({ profile, onNavigate }) {
                       </div>
                     </div>
                   </button>
-                  <button
-                    onClick={() => handleDeleteTopic(topic.id)}
+                  <button onClick={() => handleDeleteTopic(topic.id)}
                     disabled={deletingId === topic.id}
                     className="text-[#94A3B8] hover:text-[#BA1A1A] transition-colors p-1 flex-shrink-0">
                     {Icons.trash}
@@ -621,22 +673,21 @@ export default function Subjects({ profile, onNavigate }) {
         </div>
       )}
 
-      {/* SUBJECT CARDS — secondary students */}
+      {/* SUBJECT CARDS — secondary */}
       {!isUniversity && (
         <div className="f3 flex flex-col gap-3">
-          <h2 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">Or browse by subject</h2>
+          <h2 className="text-[13px] font-bold text-[#94A3B8] uppercase tracking-widest">
+            {teacherClasses.length > 0 ? 'Also browse by subject' : 'Browse by subject'}
+          </h2>
           {subjectLoading ? (
             [1,2,3].map(i => (
-              <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center justify-between gap-4 animate-pulse">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-[#F1F5F9] flex-shrink-0"/>
-                  <div>
-                    <div className="w-32 h-4 bg-[#F1F5F9] rounded mb-2"/>
-                    <div className="w-24 h-3 bg-[#F1F5F9] rounded mb-2"/>
-                    <div className="w-28 h-1.5 bg-[#F1F5F9] rounded-full"/>
-                  </div>
+              <div key={i} className="bg-white border border-[#E4E7EC] rounded-2xl p-5 flex items-center gap-4 animate-pulse">
+                <div className="w-12 h-12 rounded-xl bg-[#F1F5F9] flex-shrink-0"/>
+                <div className="flex-1">
+                  <div className="w-32 h-4 bg-[#F1F5F9] rounded mb-2"/>
+                  <div className="w-24 h-3 bg-[#F1F5F9] rounded mb-2"/>
+                  <div className="w-28 h-1.5 bg-[#F1F5F9] rounded-full"/>
                 </div>
-                <div className="w-4 h-4 bg-[#F1F5F9] rounded"/>
               </div>
             ))
           ) : (
