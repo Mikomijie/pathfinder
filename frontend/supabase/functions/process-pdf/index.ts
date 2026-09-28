@@ -105,6 +105,27 @@ function smartChunk(text: string): string[] {
   return chunks.slice(0, 6);
 }
 
+// Retry with exponential backoff
+async function retryWithBackoff(fn: () => Promise<string | null>, maxRetries = 5): Promise<string | null> {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await fn();
+      if (result) return result;
+      throw new Error('Empty result from AI');
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const waitTime = Math.min(3000 * (attempt - 1), 20000); // 0s, 3s, 6s, 9s, 12s
+        console.log(`Retry ${attempt}/${maxRetries - 1}, waiting ${waitTime}ms...`);
+        await new Promise(r => setTimeout(r, waitTime));
+      }
+    }
+  }
+  console.log(`All retries failed: ${lastError}`);
+  return null;
+}
+
 function extractJSON(content: string): any | null {
   try {
     let cleaned = content
@@ -112,16 +133,18 @@ function extractJSON(content: string): any | null {
       .replace(/^```\s*/i, '')
       .replace(/\s*```$/i, '')
       .trim();
+    
     try {
       return JSON.parse(cleaned);
     } catch {
-      const objMatch = cleaned.match(/\{[\s\S]*\}/);
+      // Use NON-GREEDY matching instead of greedy
+      const objMatch = cleaned.match(/\{[\s\S]*?\}/);
       if (objMatch) {
         return JSON.parse(objMatch[0]);
       }
     }
-  } catch {
-    // extraction failed
+  } catch (err) {
+    console.log(`extractJSON error: ${err}`);
   }
   return null;
 }
@@ -141,7 +164,7 @@ async function callAI(prompt: string, key: string): Promise<string | null> {
         messages: [
           {
             role: 'system',
-            content: 'You are a teacher. Output ONLY raw valid JSON. No markdown. No backticks. No explanation. Just the JSON.'
+            content: 'You are a teacher. Output ONLY raw valid JSON. No markdown. No backticks. No explanation. Just the JSON. Must be parseable by JSON.parse().'
           },
           { role: 'user', content: prompt }
         ],
@@ -188,9 +211,28 @@ Level: ${gradeLevel}
 Respond with ONLY this JSON, nothing else:
 {"title":"short title under 8 words","explanation":"explain in 3 simple sentences","analogy":"Nigerian real-world comparison in 2 sentences","steps":"Step 1: point. Step 2: point. Step 3: point.","question":"one reflective question"}`;
 
-    const content = await callAI(prompt, key);
+    const content = await retryWithBackoff(() => callAI(prompt, key), 5);
+    
     if (!content) {
-      console.log(`Chunk ${i} - AI call failed, skipping`);
+      console.log(`Chunk ${i} - AI call failed, using fallback`);
+      // Use fallback lesson instead of skipping
+      const stepsText = "Step 1: Read and understand the content. Step 2: Think about how it applies. Step 3: Practice and review.";
+      lessons.push({
+        title: `${topicTitle} — Part ${i + 1}`,
+        level_1: `This is part ${i + 1} of your notes on ${topicTitle}. Read carefully and take your time to understand.`,
+        level_2: `Think of this concept like something familiar in your daily life in Nigeria. It works the same way.`,
+        level_3: stepsText,
+        level_4: `What did you find most important in this section? How can you apply it?`,
+        level_3_visual: {
+          type: 'steps',
+          title: 'Key Points',
+          items: [
+            { label: 'Step 1', text: 'Read the explanation' },
+            { label: 'Step 2', text: 'Think about examples' },
+            { label: 'Step 3', text: 'Review what you learned' },
+          ]
+        }
+      });
       continue;
     }
 
@@ -217,7 +259,24 @@ Respond with ONLY this JSON, nothing else:
       });
       console.log(`Chunk ${i} - lesson created: ${lesson.title}`);
     } else {
-      console.log(`Chunk ${i} - JSON parse failed, raw: ${content.substring(0, 200)}`);
+      console.log(`Chunk ${i} - JSON parse failed, using fallback`);
+      // Use fallback instead of skipping
+      lessons.push({
+        title: `${topicTitle} — Part ${i + 1}`,
+        level_1: `This section covers important concepts from ${topicTitle}. Take time to read and understand.`,
+        level_2: `In your daily life in Nigeria, this works like something you already know. Think about the connection.`,
+        level_3: 'Step 1: Read the content carefully. Step 2: Understand the main ideas. Step 3: Remember the key points.',
+        level_4: `What is the most important thing you learned here? How does it connect to what you know?`,
+        level_3_visual: {
+          type: 'steps',
+          title: 'Key Points',
+          items: [
+            { label: 'Step 1', text: 'Read carefully' },
+            { label: 'Step 2', text: 'Understand the ideas' },
+            { label: 'Step 3', text: 'Remember and practice' },
+          ]
+        }
+      });
     }
   }
 

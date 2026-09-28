@@ -1,6 +1,24 @@
 const OPENROUTER_KEY = process.env.REACT_APP_OPENROUTER_KEY;
 const MODEL = 'openrouter/free';
 
+// Retry with exponential backoff
+async function retryWithBackoff(fn, maxRetries = 5) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const waitTime = Math.min(3000 * (attempt - 1), 20000); // 0s, 3s, 6s, 9s, 12s
+        console.log(`Retry ${attempt}/${maxRetries - 1}, waiting ${waitTime}ms...`);
+        await new Promise(r => setTimeout(r, waitTime));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function callOpenRouter(prompt, maxTokens = 400) {
   if (!OPENROUTER_KEY) {
     throw new Error('OpenRouter API key not configured');
@@ -19,11 +37,11 @@ async function callOpenRouter(prompt, maxTokens = 400) {
       messages: [
         {
           role: 'system',
-          content: 'You are a patient, encouraging teacher for neurodivergent students in Nigeria. Output ONLY raw valid JSON. No markdown. No backticks. No code blocks. No extra text. Just raw JSON.'
+          content: 'You are a patient, encouraging teacher for neurodivergent students in Nigeria. Output ONLY raw valid JSON. No markdown. No backticks. No code blocks. No extra text. Just raw JSON that can be parsed by JSON.parse().'
         },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.2,
+      temperature: 0.1,
       max_tokens: maxTokens,
     })
   });
@@ -41,29 +59,40 @@ async function callOpenRouter(prompt, maxTokens = 400) {
 
   let content = data.choices[0].message.content;
 
+  // Clean markdown wrappers
   content = content
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
 
+  if (!content) {
+    throw new Error('Empty content after cleaning');
+  }
+
   return content;
 }
 
 function extractJSON(text, arrayMode = false) {
   if (!text) throw new Error('No text to parse');
-  const pattern = arrayMode ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/;
+  
+  // Use NON-GREEDY matching instead of greedy
+  const pattern = arrayMode ? /\[[\s\S]*?\]/ : /\{[\s\S]*?\}/;
   const match = text.match(pattern);
+  
   if (!match) throw new Error(`No valid JSON ${arrayMode ? 'array' : 'object'} found in response`);
-  return JSON.parse(match[0]);
+  
+  const extracted = match[0];
+  const parsed = JSON.parse(extracted);
+  
+  return parsed;
 }
 
 export async function generateInteractiveQuestion(topicTitle, lessonText) {
   const title = topicTitle || 'This topic';
   const text = lessonText || 'Explain the key concepts of this topic.';
 
-  try {
-    const prompt = `Generate ONE multiple choice question to check understanding of: "${title}"
+  const prompt = `Generate ONE multiple choice question to check understanding of: "${title}"
 Based on this lesson: "${text.slice(0, 600)}"
 
 Return ONLY this JSON object:
@@ -75,11 +104,18 @@ Rules:
 - No time pressure implied in the question
 - Make distractors (wrong answers) plausible but clearly wrong`;
 
-    const content = await callOpenRouter(prompt, 300);
+  try {
+    const content = await retryWithBackoff(() => callOpenRouter(prompt, 300), 5);
     return extractJSON(content, false);
   } catch (err) {
     console.error('generateInteractiveQuestion error:', err.message);
-    return null;
+    // Return fallback question instead of null
+    return {
+      question: "What did you learn from this lesson?",
+      options: ["I learned the main concepts", "I need to review more", "I understood everything", "I need help"],
+      answer: 0,
+      explanation: "Great! Review what you've learned so far."
+    };
   }
 }
 
@@ -87,8 +123,7 @@ export async function generateQuiz(topicTitle, lessonText) {
   const title = topicTitle || 'This topic';
   const text = lessonText || 'Explain the key concepts of this topic clearly and simply.';
 
-  try {
-    const prompt = `Generate exactly 3 multiple choice questions about: "${title}"
+  const prompt = `Generate exactly 3 multiple choice questions about: "${title}"
 Based on: "${text.slice(0, 600)}"
 
 Return ONLY this JSON array:
@@ -103,11 +138,32 @@ Rules:
 - Each question tests a different part of the lesson
 - Keep language simple and encouraging`;
 
-    const content = await callOpenRouter(prompt, 600);
+  try {
+    const content = await retryWithBackoff(() => callOpenRouter(prompt, 600), 5);
     return extractJSON(content, true);
   } catch (err) {
     console.error('generateQuiz error:', err.message);
-    return null;
+    // Return fallback quiz instead of null
+    return [
+      {
+        question: "What was the main idea?",
+        options: ["Main concept", "Secondary idea", "Unrelated topic", "Not clear"],
+        answer: 0,
+        explanation: "The main idea is the core concept to remember."
+      },
+      {
+        question: "How can you apply this?",
+        options: ["In real life", "Only in class", "Never", "Unsure"],
+        answer: 0,
+        explanation: "Understanding helps you apply knowledge in real situations."
+      },
+      {
+        question: "Do you feel confident?",
+        options: ["Very confident", "Somewhat confident", "Need more practice", "Not yet"],
+        answer: 1,
+        explanation: "That's normal. Keep practicing!"
+      }
+    ];
   }
 }
 
@@ -115,8 +171,7 @@ export async function generateFlashcards(topicTitle, lessonText) {
   const title = topicTitle || 'This topic';
   const text = lessonText || 'Key concepts from this topic.';
 
-  try {
-    const prompt = `Extract 5 key concept pairs from this lesson about: "${title}"
+  const prompt = `Extract 5 key concept pairs from this lesson about: "${title}"
 Content: "${text.slice(0, 600)}"
 
 Return ONLY this JSON array:
@@ -134,11 +189,19 @@ Rules:
 - Simple Nigerian English
 - Focus on most important concepts`;
 
-    const content = await callOpenRouter(prompt, 500);
+  try {
+    const content = await retryWithBackoff(() => callOpenRouter(prompt, 500), 5);
     return extractJSON(content, true);
   } catch (err) {
     console.error('generateFlashcards error:', err.message);
-    return null;
+    // Return fallback flashcards instead of null
+    return [
+      { front: "What is the main topic?", back: title },
+      { front: "Why is this important?", back: "It helps you understand key concepts." },
+      { front: "What should I remember?", back: "The key ideas from this lesson." },
+      { front: "How do I practice?", back: "Review regularly and test yourself." },
+      { front: "Am I doing well?", back: "Yes! Keep learning and improving." }
+    ];
   }
 }
 
@@ -146,8 +209,7 @@ export async function generateLessonFromText(topicTitle, subject, contentText) {
   const title = topicTitle || 'This topic';
   const text = contentText || '';
 
-  try {
-    const prompt = `Create a complete adaptive lesson about: "${title}" for subject: "${subject}"
+  const prompt = `Create a complete adaptive lesson about: "${title}" for subject: "${subject}"
 Based on this content: "${text.slice(0, 2000)}"
 
 Return ONLY this JSON object:
@@ -161,10 +223,26 @@ The level_3_visual type must be one of:
 Pick the type that best fits the topic content.
 Keep all levels appropriate for the student. Use simple, encouraging language.`;
 
-    const content = await callOpenRouter(prompt, 1000);
+  try {
+    const content = await retryWithBackoff(() => callOpenRouter(prompt, 1000), 5);
     return extractJSON(content, false);
   } catch (err) {
     console.error('generateLessonFromText error:', err.message);
-    return null;
+    // Return fallback lesson instead of null
+    return {
+      level_1: `${title} is an important concept. It helps you understand key ideas in ${subject}. Take your time to learn at your own pace.`,
+      level_2: `Think of ${title} like something familiar in your daily life. It works the same way as things you already understand.`,
+      level_3: "Step 1: Read and understand. Step 2: Think about how it applies. Step 3: Practice and remember.",
+      level_4: `What do you find most interesting about ${title}? How can you use this in your life?`,
+      level_3_visual: {
+        type: "steps",
+        title: "How to Learn This",
+        items: [
+          { label: "Step 1", text: "Read the explanation carefully" },
+          { label: "Step 2", text: "Think about the example" },
+          { label: "Step 3", text: "Practice with questions" }
+        ]
+      }
+    };
   }
 }

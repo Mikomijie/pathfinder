@@ -126,9 +126,10 @@ Return ONLY this exact JSON, no markdown, no backticks:
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty response from AI');
   const clean = content.replace(/```json|```/g, '').trim();
-  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+ const jsonMatch = clean.match(/\{[\s\S]*?\}/);
   if (!jsonMatch) throw new Error('No valid JSON in response');
-  return JSON.parse(jsonMatch[0]);
+ if (!jsonMatch) throw new Error('No JSON found in response');
+return JSON.parse(jsonMatch[0]); 
 }
 
 export default function Subjects({ profile, onNavigate }) {
@@ -318,9 +319,15 @@ export default function Subjects({ profile, onNavigate }) {
 
       const lessonContent = await generateLesson(query, subject);
 
-      const { data: newTopic, error: topicError } = await supabase
-        .from('topics')
-        .insert({
+if (!lessonContent) {
+  setGenerateError('Could not generate lesson. Please try again.');
+  setGenerating(false);
+  return;
+}
+
+const { data: newTopic, error: topicError } = await supabase
+  .from('topics')
+  .insert({
           subject,
           title: query.trim(),
           description: `AI-generated lesson on ${query.trim()}`,
