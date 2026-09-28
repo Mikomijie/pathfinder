@@ -291,17 +291,22 @@ export default function TeacherDashboard() {
       setUploadStep('AI is creating lessons from your content...');
 
       let data, error;
-      const result1 = await supabase.functions.invoke('process-pdf', { body: payload });
-      if (result1.error) {
-        console.log('First attempt failed, retrying...');
-        setUploadStep('Retrying...');
-        await new Promise(r => setTimeout(r, 3000));
-        const result2 = await supabase.functions.invoke('process-pdf', { body: payload });
-        data = result2.data;
-        error = result2.error;
-      } else {
-        data = result1.data;
-        error = result1.error;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const result = await supabase.functions.invoke('process-pdf', { body: payload });
+        if (!result.error) {
+          data = result.data;
+          error = result.error;
+          break;
+        }
+        if (attempt < 5) {
+          const waitTime = Math.min(3000 * (attempt - 1), 20000); // 0s, 3s, 6s, 9s, 12s
+          console.log(`Attempt ${attempt} failed, retrying in ${waitTime}ms...`);
+          setUploadStep(`Retrying... (attempt ${attempt + 1}/5)`);
+          await new Promise(r => setTimeout(r, waitTime));
+        } else {
+          data = result.data;
+          error = result.error;
+        }
       }
 
       if (error) throw error;
