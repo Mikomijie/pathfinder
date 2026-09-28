@@ -102,9 +102,6 @@ REACT_APP_SUPABASE_URL is the URL of your Supabase project. REACT_APP_SUPABASE_A
 
 The Edge Function requires OPENROUTER_API_KEY set as a Supabase secret. The SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided automatically by Supabase to all Edge Functions.
 
-## Competition Context
-
-Pathfinder was built for two competitions. The Babcock Priority Innovation Challenge on Neurodiversity, titled Different Minds, awards one million naira for the best innovation addressing neurodiversity in Nigerian education. The Qavaa Innovate AI Challenge 2026 awards one thousand US dollars for the best AI-powered solution to a real problem. Pathfinder was submitted to both competitions in September 2026.
 
 ## Design Philosophy
 
