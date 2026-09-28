@@ -149,7 +149,6 @@ export default function PDFUpload({ profile }) {
         if (attempt < 5) {
           const waitTime = Math.min(3000 * (attempt - 1), 20000); // 0s, 3s, 6s, 9s, 12s
           console.log(`Attempt ${attempt} failed, retrying in ${waitTime}ms...`);
-          setUploadStep(`Retrying... (attempt ${attempt + 1}/5)`);
           await new Promise(r => setTimeout(r, waitTime));
         } else {
           data = result.data;

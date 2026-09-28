@@ -102,34 +102,52 @@ Create an adaptive lesson about: "${topicTitle}" for subject: "${subject}"
 Return ONLY this exact JSON, no markdown, no backticks:
 {"level_1":"Simple clear explanation in 3-4 sentences.","level_2":"Real-world Nigerian analogy. 3-4 sentences.","level_3":"Step 1: ... Step 2: ... Step 3: ...","level_4":"Think about this: one reflective question","level_3_visual":{"type":"steps","title":"How it works","items":[{"label":"Step 1","text":"first key point"},{"label":"Step 2","text":"second key point"},{"label":"Step 3","text":"third key point"}]}}`;
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'Pathfinder'
-    },
-    body: JSON.stringify({
-      model: 'openrouter/free',
-      messages: [
-        { role: 'system', content: 'Output ONLY raw valid JSON. No markdown. No backticks.' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.2,
-      max_tokens: 800
-    })
-  });
+  // Retry with exponential backoff
+  async function callAPI() {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'Pathfinder'
+      },
+      body: JSON.stringify({
+        model: 'openrouter/free',
+        messages: [
+          { role: 'system', content: 'Output ONLY raw valid JSON. No markdown. No backticks.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.2,
+        max_tokens: 800
+      })
+    });
 
-  if (!response.ok) throw new Error(`OpenRouter error: ${response.status}`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Empty response from AI');
-  const clean = content.replace(/```json|```/g, '').trim();
- const jsonMatch = clean.match(/\{[\s\S]*?\}/);
-  if (!jsonMatch) throw new Error('No valid JSON in response');
- if (!jsonMatch) throw new Error('No JSON found in response');
-return JSON.parse(jsonMatch[0]); 
+    if (!response.ok) throw new Error(`OpenRouter error: ${response.status}`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('Empty response from AI');
+    return content;
+  }
+
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const content = await callAPI();
+      const clean = content.replace(/```json|```/g, '').trim();
+      const jsonMatch = clean.match(/\{[\s\S]*?\}/);
+      if (!jsonMatch) throw new Error('No valid JSON in response');
+      return JSON.parse(jsonMatch[0]);
+    } catch (err) {
+      lastError = err;
+      if (attempt < 5) {
+        const waitTime = Math.min(3000 * (attempt - 1), 20000); // 0s, 3s, 6s, 9s, 12s
+        console.log(`Retry ${attempt}/4, waiting ${waitTime}ms...`);
+        await new Promise(r => setTimeout(r, waitTime));
+      }
+    }
+  }
+  throw lastError;
 }
 
 export default function Subjects({ profile, onNavigate }) {
