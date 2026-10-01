@@ -160,15 +160,22 @@ export default function Flashcards() {
         setCards(hardcoded);
       } else {
         // AI-generated topic — use generateFlashcards from OpenRouter
-        const { data: lessonData } = await supabase
-          .from('lessons').select('level_1, level_2').eq('topic_id', topicId).single();
+              const { data: lessonData } = await supabase
+          .from('lessons').select('level_1,level_2,level_3,level_4').eq('topic_id', topicId).single();
 
         if (lessonData?.level_1) {
           setGenerating(true);
           try {
+            const allMaterial = [
+              lessonData?.level_1,
+              lessonData?.level_2,
+              lessonData?.level_3,
+              lessonData?.level_4
+            ].filter(Boolean).join(' ');
+            
             const aiCards = await generateFlashcards(
               topicData?.title,
-              lessonData.level_1 + ' ' + (lessonData.level_2 || '')
+              allMaterial
             );
             if (aiCards && aiCards.length > 0) {
               setCards(aiCards.map(c => ({ front: c.front, back: c.back })));

@@ -86,15 +86,23 @@ export default function Quiz() {
       } else {
         setGenerating(true);
         try {
-          const { data: lessonData } = await supabase
-            .from('lessons').select('level_1').eq('topic_id', topicId).single();
+                    const { data: lessonData } = await supabase
+            .from('lessons').select('level_1,level_2,level_3,level_4').eq('topic_id', topicId).single();
+
+          // Combine all lesson material for comprehensive quiz generation
+          const allMaterial = [
+            lessonData?.level_1,
+            lessonData?.level_2,
+            lessonData?.level_3,
+            lessonData?.level_4
+          ].filter(Boolean).join(' ');
 
           const aiQuestions = await generateQuiz(
             topicData?.title,
-            lessonData?.level_1
+            allMaterial
           );
 
-          if (aiQuestions && aiQuestions.length > 0) {
+               if (aiQuestions && aiQuestions.length > 0) {
             const formatted = aiQuestions.map(q => ({
               question: q.question,
               option_a: q.options[0],
@@ -105,9 +113,13 @@ export default function Quiz() {
               explanation: q.explanation,
             }));
             setQuestions(formatted);
+          } else {
+            console.warn('AI quiz generation returned empty. Retrying with fallback.');
+            setQuestions([]);
           }
         } catch (err) {
           console.error('AI quiz generation failed:', err);
+          setQuestions([]);
         } finally {
           setGenerating(false);
         }

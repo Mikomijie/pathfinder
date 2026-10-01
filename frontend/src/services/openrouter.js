@@ -92,30 +92,34 @@ export async function generateInteractiveQuestion(topicTitle, lessonText) {
   const title = topicTitle || 'This topic';
   const text = lessonText || 'Explain the key concepts of this topic.';
 
-  const prompt = `Generate ONE multiple choice question to check understanding of: "${title}"
-Based on this lesson: "${text.slice(0, 600)}"
+  const prompt = `You are creating ONE quiz question ONLY from this exact lesson material. You MUST NOT use any external knowledge.
 
-Return ONLY this JSON object:
-{"question":"your question here","options":["Option A","Option B","Option C","Option D"],"answer":0,"explanation":"brief encouraging explanation of why the answer is correct"}
+LESSON MATERIAL:
+"${text.slice(0, 600)}"
 
-Rules:
-- answer is the index (0-3) of the correct option
-- Keep language simple and encouraging
-- No time pressure implied in the question
-- Make distractors (wrong answers) plausible but clearly wrong`;
+Create ONE multiple choice question that:
+- Tests understanding of a specific fact, concept, or detail FROM the material
+- Has ONE correct answer (index 0-3)
+- Has 3 wrong answers based on the material (not random guesses)
+- Does NOT ask generic questions like "What did you learn?"
+- Does NOT use external knowledge about "${title}"
+
+Return ONLY this JSON object (no extra text):
+{"question":"specific question from the material","options":["answer option A from material","answer option B from material","answer option C from material","answer option D from material"],"answer":0,"explanation":"why this answer is correct based on the material"}
+
+CRITICAL: The question MUST be answerable ONLY from the provided material above.`;
 
   try {
     const content = await retryWithBackoff(() => callOpenRouter(prompt, 300), 5);
-    return extractJSON(content, false);
+    const question = extractJSON(content, false);
+    
+    if (question && question.question && Array.isArray(question.options) && question.options.length === 4) {
+      return question;
+    }
+    throw new Error('Invalid question format');
   } catch (err) {
     console.error('generateInteractiveQuestion error:', err.message);
-    // Return fallback question instead of null
-    return {
-      question: "What did you learn from this lesson?",
-      options: ["I learned the main concepts", "I need to review more", "I understood everything", "I need help"],
-      answer: 0,
-      explanation: "Great! Review what you've learned so far."
-    };
+    return null;
   }
 }
 
@@ -123,47 +127,44 @@ export async function generateQuiz(topicTitle, lessonText) {
   const title = topicTitle || 'This topic';
   const text = lessonText || 'Explain the key concepts of this topic clearly and simply.';
 
-  const prompt = `Generate exactly 3 multiple choice questions about: "${title}"
-Based on: "${text.slice(0, 600)}"
+  const prompt = `You are creating a quiz ONLY from this exact lesson material. You MUST NOT use any external knowledge.
 
-Return ONLY this JSON array:
+LESSON MATERIAL:
+"${text.slice(0, 600)}"
+
+Your task:
+- Create EXACTLY 3 multiple choice questions
+- EVERY question MUST be answerable ONLY from the material above
+- EVERY wrong answer MUST be based on the material (not random distractors)
+- Questions MUST test specific facts, concepts, examples, or definitions FROM the material
+- Do NOT create generic questions like "What is the main idea?" or "How can you apply this?"
+- Do NOT use external knowledge about "${title}"
+- Each question must test a DIFFERENT concept from the material
+
+Return ONLY this JSON array (no extra text, no markdown):
 [
-{"question":"question 1","options":["A","B","C","D"],"answer":0,"explanation":"encouraging explanation"},
-{"question":"question 2","options":["A","B","C","D"],"answer":1,"explanation":"encouraging explanation"},
-{"question":"question 3","options":["A","B","C","D"],"answer":2,"explanation":"encouraging explanation"}
+{"question":"specific question from material","options":["answer A from material","answer B from material","answer C from material","answer D from material"],"answer":0,"explanation":"why this is correct based on the material"},
+{"question":"another specific question from material","options":["option A","option B","option C","option D"],"answer":1,"explanation":"explanation based on material"},
+{"question":"third specific question from material","options":["option A","option B","option C","option D"],"answer":2,"explanation":"explanation based on material"}
 ]
 
-Rules:
-- answer is the index (0-3) of the correct option
-- Each question tests a different part of the lesson
-- Keep language simple and encouraging`;
+IMPORTANT: If the material is short or lacks detail, base questions on what IS there. Do NOT add information from external sources.`;
 
   try {
     const content = await retryWithBackoff(() => callOpenRouter(prompt, 600), 5);
-    return extractJSON(content, true);
+    const quiz = extractJSON(content, true);
+    
+    // Validate that we got actual questions
+    if (Array.isArray(quiz) && quiz.length === 3) {
+      const validQuestions = quiz.filter(q => q.question && Array.isArray(q.options) && q.options.length === 4 && typeof q.answer === 'number');
+      if (validQuestions.length === 3) {
+        return validQuestions;
+      }
+    }
+    throw new Error('Invalid quiz format returned');
   } catch (err) {
     console.error('generateQuiz error:', err.message);
-    // Return fallback quiz instead of null
-    return [
-      {
-        question: "What was the main idea?",
-        options: ["Main concept", "Secondary idea", "Unrelated topic", "Not clear"],
-        answer: 0,
-        explanation: "The main idea is the core concept to remember."
-      },
-      {
-        question: "How can you apply this?",
-        options: ["In real life", "Only in class", "Never", "Unsure"],
-        answer: 0,
-        explanation: "Understanding helps you apply knowledge in real situations."
-      },
-      {
-        question: "Do you feel confident?",
-        options: ["Very confident", "Somewhat confident", "Need more practice", "Not yet"],
-        answer: 1,
-        explanation: "That's normal. Keep practicing!"
-      }
-    ];
+    return [];
   }
 }
 
@@ -171,37 +172,42 @@ export async function generateFlashcards(topicTitle, lessonText) {
   const title = topicTitle || 'This topic';
   const text = lessonText || 'Key concepts from this topic.';
 
-  const prompt = `Extract 5 key concept pairs from this lesson about: "${title}"
-Content: "${text.slice(0, 600)}"
+  const prompt = `You are extracting key concepts ONLY from this exact lesson material. Do NOT use external knowledge.
 
-Return ONLY this JSON array:
+LESSON MATERIAL:
+"${text.slice(0, 600)}"
+
+Extract up to 5 key concept pairs FROM the material:
+- Each pair should test understanding of specific facts, definitions, or concepts from the material
+- Do NOT use external knowledge about "${title}"
+- Front side: key term or short question (under 10 words)
+- Back side: answer from the material (under 20 words)
+
+Return ONLY this JSON array (no extra text):
 [
-{"front":"key term or short question","back":"simple clear answer under 20 words"},
-{"front":"key term or short question","back":"simple clear answer under 20 words"},
-{"front":"key term or short question","back":"simple clear answer under 20 words"},
-{"front":"key term or short question","back":"simple clear answer under 20 words"},
-{"front":"key term or short question","back":"simple clear answer under 20 words"}
+{"front":"key term from material","back":"definition or answer from material"},
+{"front":"key term from material","back":"definition or answer from material"},
+{"front":"key term from material","back":"definition or answer from material"},
+{"front":"key term from material","back":"definition or answer from material"},
+{"front":"key term from material","back":"definition or answer from material"}
 ]
 
-Rules:
-- front under 10 words
-- back under 20 words
-- Simple Nigerian English
-- Focus on most important concepts`;
+Use simple Nigerian English. Extract only what is in the material.`;
 
   try {
     const content = await retryWithBackoff(() => callOpenRouter(prompt, 500), 5);
-    return extractJSON(content, true);
+    const flashcards = extractJSON(content, true);
+    
+    if (Array.isArray(flashcards) && flashcards.length > 0) {
+      const validFlashcards = flashcards.filter(f => f.front && f.back);
+      if (validFlashcards.length > 0) {
+        return validFlashcards;
+      }
+    }
+    throw new Error('Invalid flashcards format');
   } catch (err) {
     console.error('generateFlashcards error:', err.message);
-    // Return fallback flashcards instead of null
-    return [
-      { front: "What is the main topic?", back: title },
-      { front: "Why is this important?", back: "It helps you understand key concepts." },
-      { front: "What should I remember?", back: "The key ideas from this lesson." },
-      { front: "How do I practice?", back: "Review regularly and test yourself." },
-      { front: "Am I doing well?", back: "Yes! Keep learning and improving." }
-    ];
+    return [];
   }
 }
 
@@ -228,21 +234,6 @@ Keep all levels appropriate for the student. Use simple, encouraging language.`;
     return extractJSON(content, false);
   } catch (err) {
     console.error('generateLessonFromText error:', err.message);
-    // Return fallback lesson instead of null
-    return {
-      level_1: `${title} is an important concept. It helps you understand key ideas in ${subject}. Take your time to learn at your own pace.`,
-      level_2: `Think of ${title} like something familiar in your daily life. It works the same way as things you already understand.`,
-      level_3: "Step 1: Read and understand. Step 2: Think about how it applies. Step 3: Practice and remember.",
-      level_4: `What do you find most interesting about ${title}? How can you use this in your life?`,
-      level_3_visual: {
-        type: "steps",
-        title: "How to Learn This",
-        items: [
-          { label: "Step 1", text: "Read the explanation carefully" },
-          { label: "Step 2", text: "Think about the example" },
-          { label: "Step 3", text: "Practice with questions" }
-        ]
-      }
-    };
+    return null;
   }
 }
